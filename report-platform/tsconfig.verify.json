@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "outDir": ".verify-build",
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmit": false,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["types/node-crypto.d.ts", "src/lib/types.ts", "src/server/**/*.ts", "scripts/verify.ts", "scripts/verify-lifecycle.ts", "scripts/smoke-nl2sql.ts"]
+}

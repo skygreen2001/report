@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "outDir": ".test-build",
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmit": false,
+    "types": ["node"]
+  },
+  "include": [
+    "test/gateway.test.ts",
+    "src/server/sql/parser.ts",
+    "src/server/sql/validator.ts",
+    "src/server/sql/rewriter.ts",
+    "src/server/errors.ts"
+  ]
+}
