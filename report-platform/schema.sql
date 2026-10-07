@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS data_source (
   password_enc       MEDIUMTEXT   NOT NULL,   -- AES-256-GCM 密文
   status             ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
   catalog_json       MEDIUMTEXT,              -- 元数据缓存（库/表/字段/注释）
+  schema_doc_json    MEDIUMTEXT,              -- 数据库结构文档缓存（表/字段/索引/外键）
+  schema_doc_at      DATETIME NULL,           -- 结构文档生成时间
   sensitive_columns_json MEDIUMTEXT,          -- 脱敏策略
   created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -189,4 +191,24 @@ CREATE TABLE IF NOT EXISTS export_task (
   error_msg     MEDIUMTEXT,
   PRIMARY KEY (id),
   KEY idx_app_client (app_id, client_key, started_at)
+) ENGINE=InnoDB;
+
+-- ---------- llm_provider（模型服务商 / 本地自建模型，一个应用可配多个）----------
+-- OpenAI 兼容协议：国内主流厂商（DeepSeek/通义/智谱GLM/豆包/Kimi/混元/千帆/星火/MiniMax/硅基流动）
+-- 以及本地模型（Ollama / vLLM / Xinference / LM Studio）统一按 endpoint + model + api_key 接入。
+CREATE TABLE IF NOT EXISTS llm_provider (
+  id           VARCHAR(36)  NOT NULL,
+  app_id       VARCHAR(36)  NOT NULL,
+  scope        ENUM('DEVELOPER','CLIENT') NOT NULL DEFAULT 'DEVELOPER', -- 归属角色：开发者 / 甲方各自一套，互不干扰
+  name         VARCHAR(120) NOT NULL,          -- 展示名，如「DeepSeek-V3」
+  vendor       VARCHAR(40)  NOT NULL DEFAULT 'custom',
+  endpoint     VARCHAR(255) NOT NULL,          -- OpenAI 兼容 baseURL
+  model        VARCHAR(120) NOT NULL,
+  api_key_enc  MEDIUMTEXT,                     -- AES-256-GCM 密文；本地模型可为空
+  is_default   TINYINT(1)   NOT NULL DEFAULT 0,
+  status       ENUM('ACTIVE','DISABLED') NOT NULL DEFAULT 'ACTIVE',
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_app (app_id)
 ) ENGINE=InnoDB;

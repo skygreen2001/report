@@ -15,7 +15,12 @@ export async function POST(req: Request) {
     const body = GenerateSchema.parse(await req.json());
     const dataSourceId = body.dataSourceId ?? (await resolveDefaultDataSourceId(ctx)) ?? undefined;
     if (!dataSourceId) throw new HttpError(400, 'NO_DATA_SOURCE');
-    const result = await generateSql(ctx, { prompt: body.prompt, dataSourceId, currentSql: body.currentSql ?? undefined });
+    const result = await generateSql(ctx, {
+      prompt: body.prompt,
+      dataSourceId,
+      currentSql: body.currentSql ?? undefined,
+      providerId: body.providerId ?? undefined,
+    });
     return json(result);
   });
 }

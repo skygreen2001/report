@@ -8,6 +8,14 @@ import type { DataSourceRow } from '@/lib/types';
 const g = globalThis as unknown as { __dsPools?: Map<string, mysql.Pool> };
 const pools: Map<string, mysql.Pool> = g.__dsPools ?? (g.__dsPools = new Map());
 
+// 删除数据源时释放缓存中的连接池（顺手关闭，防止连接泄漏；关闭失败不影响删除）
+export function releaseDsPool(id: string): void {
+  const p = pools.get(id);
+  if (!p) return;
+  pools.delete(id);
+  void p.end().catch(() => {});
+}
+
 export function getDsPool(ds: DataSourceRow): mysql.Pool {
   let pool = pools.get(ds.id);
   if (!pool) {

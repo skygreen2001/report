@@ -51,6 +51,20 @@ export async function completeRequirement(ctx: RoleContext, id: string): Promise
   });
 }
 
+// 开发者据此需求生成报表后回填并标记完成（REQ-COL-04 增强）：把生成的报表 id 关联到需求，
+// 状态置 PENDING_CONFIRM，甲方端随后可在「我的报表」看到这份报表并确认。
+export async function fulfillRequirement(ctx: RoleContext, id: string, reportId: string): Promise<void> {
+  if (ctx.role !== 'DEVELOPER') throw new HttpError(403, 'FORBIDDEN');
+  await platformTx(async (tx) => {
+    const r = await tx.get('SELECT * FROM requirement WHERE id=? AND app_id=?', [id, ctx.appId]);
+    if (!r) throw new HttpError(404, 'REQ_NOT_FOUND');
+    await tx.run(
+      'UPDATE requirement SET status=?, report_id=?, updated_at=NOW() WHERE id=?',
+      ['PENDING_CONFIRM', reportId, id],
+    );
+  });
+}
+
 // 甲方确认/驳回（REQ-COL-05/06）
 export async function confirmRequirement(ctx: RoleContext, id: string, confirm: boolean): Promise<void> {
   if (ctx.role !== 'CLIENT') throw new HttpError(403, 'FORBIDDEN');

@@ -34,6 +34,8 @@ export interface DataSourceRow {
   password_enc: string;
   status: 'ACTIVE' | 'INACTIVE';
   catalog_json: string | null;
+  schema_doc_json?: string | null; // 数据库结构文档缓存
+  schema_doc_at?: string | null;
   sensitive_columns_json: string | null;
 }
 
@@ -52,6 +54,21 @@ export interface ReportRow {
   client_purged_at: string | null;
   purge_due_at: string | null;
   created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LlmProviderRow {
+  id: string;
+  app_id: string;
+  scope: 'DEVELOPER' | 'CLIENT';
+  name: string;
+  vendor: string;
+  endpoint: string;
+  model: string;
+  api_key_enc: string | null; // AES-256-GCM 密文，接口永不返回
+  is_default: 0 | 1;
+  status: 'ACTIVE' | 'DISABLED';
   created_at: string;
   updated_at: string;
 }

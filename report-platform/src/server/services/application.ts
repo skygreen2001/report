@@ -45,6 +45,15 @@ export async function disableApplication(ctx: RoleContext, id: string): Promise<
   invalidateAppCache(app.host, app.path_prefix); // 即时失效缓存（REQ-ACC-07）
 }
 
+// 重新启用（停用可逆，否则误点一次只能改库）
+export async function enableApplication(ctx: RoleContext, id: string): Promise<void> {
+  if (!ctx.app.is_platform_root) throw new HttpError(403, 'NOT_PLATFORM_ROOT');
+  const app = await pGet<ApplicationRow>('SELECT * FROM application WHERE id=?', [id]);
+  if (!app) throw new HttpError(404, 'APP_NOT_FOUND');
+  await pRun("UPDATE application SET status='ACTIVE' WHERE id=?", [id]);
+  invalidateAppCache(app.host, app.path_prefix);
+}
+
 export async function listApplications(): Promise<ApplicationRow[]> {
   return pQuery<ApplicationRow>('SELECT * FROM application ORDER BY is_platform_root DESC, created_at');
 }

@@ -1,6 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import { LLM_PRESETS, presetOf, vendorLabel, initialProviderForm } from '@/lib/llm-presets';
+import SchemaDoc, { type DsLite } from '@/components/SchemaDoc';
 
 interface Settings { clientCanViewSql: boolean; defaultDs: string | null; maxRows: number; [k: string]: any; }
 interface ReportItem { id: string; name: string; tag_node_id: string | null; client_state: string; created_at: string; }
@@ -18,7 +20,7 @@ function parseSchema(json?: string | null): ParamDef[] {
 export default function ClientPage() {
   const { appPath } = useParams<{ appPath: string }>();
   const api = `/${appPath}/c/api`;
-  const [tab, setTab] = useState<'gen' | 'reports'>('reports');
+  const [tab, setTab] = useState<'gen' | 'reports' | 'bin' | 'doc' | 'llm'>('reports');
   const [appName, setAppName] = useState('');
   const [settings, setSettings] = useState<Settings | null>(null);
   const [prompt, setPrompt] = useState('');
@@ -42,6 +44,13 @@ export default function ClientPage() {
   const [repCols, setRepCols] = useState<string[]>([]);
   const [repRows, setRepRows] = useState<any[]>([]);
   const [repMsg, setRepMsg] = useState('');
+  // 模型配置（甲方自己的作用域，与开发者互不干扰；这里能看到并管理自己填的密钥）
+  const [providers, setProviders] = useState<any[]>([]);
+  const [providerId, setProviderId] = useState<string>('');
+  const [llmForm, setLlmForm] = useState(() => initialProviderForm(true));
+  const [llmTest, setLlmTest] = useState<Record<string, string>>({});
+  // 数据库连接（只读：id / 名称 / 库名），用于查看数据库结构文档
+  const [dsList, setDsList] = useState<DsLite[]>([]);
 
   async function loadBoot() {
     try {
@@ -52,9 +61,81 @@ export default function ClientPage() {
       setSettings(d.settings);
       setReports(d.reports || []);
       setTagTree(d.tagTree || []);
+      setProviders(d.llmProviders || []);
+      setDsList(d.dataSources || []);
     } catch (e: any) { setErr('加载失败：' + e.message); }
   }
   useEffect(() => { loadBoot(); }, [api]);
+  // 支持 /{app}/c?tab=doc 直达结构文档
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    if (t === 'doc' || t === 'gen' || t === 'reports') setTab(t);
+  }, []);
+
+  // —— 模型配置（甲方自己的作用域）——
+  function applyPreset(vendor: string) {
+    const p = LLM_PRESETS.find((x) => x.vendor === vendor);
+    setLlmForm((f) => ({
+      ...f, vendor,
+      endpoint: p?.endpoint ?? f.endpoint,
+      model: p?.models?.[0] ?? f.model,
+      name: p ? p.label : f.name,
+    }));
+  }
+  async function createProvider() {
+    setErr(''); setMsg('');
+    if (!llmForm.name || !llmForm.endpoint || !llmForm.model) { setErr('请填写模型名称、接口地址与模型名'); return; }
+    try {
+      const r = await fetch(`${api}/llm-providers`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: llmForm.name, vendor: llmForm.vendor, endpoint: llmForm.endpoint,
+          model: llmForm.model, apiKey: llmForm.apiKey || null, isDefault: llmForm.isDefault,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.message || `新增失败（HTTP ${r.status}）`); return; }
+      setMsg(`模型「${llmForm.name}」已添加${llmForm.isDefault ? '，并设为默认' : ''}`);
+      setLlmForm(initialProviderForm(true));
+      await loadBoot();
+    } catch (e: any) { setErr('新增失败：' + e.message); }
+  }
+  async function testProviderCall(id: string, tmpKey?: string) {
+    setErr(''); setMsg(''); setLlmTest((p) => ({ ...p, [id]: '测试中…' }));
+    try {
+      const r = await fetch(`${api}/llm-providers/${id}/test`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tmpKey ? { apiKey: tmpKey } : {}),
+      });
+      const d = await r.json().catch(() => ({}));
+      setLlmTest((p) => ({ ...p, [id]: d.ok ? `✓ ${d.message || '连通成功'}` : `✗ ${d.message || '连通失败'}` }));
+    } catch (e: any) { setLlmTest((p) => ({ ...p, [id]: '✗ ' + e.message })); }
+  }
+  async function makeDefaultProvider(id: string) {
+    setErr(''); setMsg('');
+    const r = await fetch(`${api}/llm-providers/${id}/default`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { setErr(d.message || '设置失败'); return; }
+    setMsg('已设为默认模型'); await loadBoot();
+  }
+  async function toggleProvider(p: any) {
+    setErr(''); setMsg('');
+    const next = p.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
+    const r = await fetch(`${api}/llm-providers/${p.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: next }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { setErr(d.message || '操作失败'); return; }
+    setMsg(next === 'ACTIVE' ? '已启用' : '已停用'); await loadBoot();
+  }
+  async function delProvider(p: any) {
+    if (!confirm(`确认删除模型「${p.name}」？`)) return;
+    setErr(''); setMsg('');
+    const r = await fetch(`${api}/llm-providers/${p.id}`, { method: 'DELETE' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { setErr(d.message || '删除失败'); return; }
+    setMsg('已删除'); await loadBoot();
+  }
 
   const dsId = settings?.defaultDs ?? '';
   const nodeOf = (id: string | null) => tagTree.find((n) => n.id === id);
@@ -67,13 +148,32 @@ export default function ClientPage() {
     try {
       const r = await fetch(`${api}/reports/generate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, dataSourceId: dsId }),
+        body: JSON.stringify({ prompt, dataSourceId: dsId, providerId: providerId || undefined }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.message || '生成失败');
       setGenMode(d.mode); setSql(d.sql ?? ''); setUnderstanding(d.understanding ?? (d.reason ? '降级手工模式：' + d.reason : ''));
-      if (d.mode === 'manual') setErr('LLM 未配置或失败，已降级手工模式，请开发者填写 SQL。');
+      // 甲方未配置任何模型：直接把需求描述提交给开发者，由开发者据此生成 SQL 报表
+      if (d.mode === 'manual' && d.noModel) {
+        await submitRequirement(prompt);
+        setSql(''); setUnderstanding('');
+        setMsg('你尚未配置模型，已把需求提交给开发者，请等待开发者生成报表。');
+        setErr('');
+        return;
+      }
+      if (d.mode === 'manual') setErr('LLM 生成失败：' + (d.reason || '请检查模型配置或网络，也可点「求助开发者」'));
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  }
+
+  // 把需求描述直接提交给开发者（无模型时的主路径；也供「求助开发者」复用）
+  async function submitRequirement(promptText: string) {
+    if (!promptText?.trim()) return;
+    try {
+      await fetch(`${api}/requirements`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: promptText }),
+      });
+    } catch { /* 静默：提交失败不应阻断用户操作 */ }
   }
 
   async function preview() {
@@ -153,6 +253,7 @@ export default function ClientPage() {
     if (!r.ok) { setErr(d.message); return; }
     setMsg('已提交求助，等待开发者处理');
   }
+  // 注：无模型时的「直接交需求」走 submitRequirement（见 gen）；help 用于生成失败后的补充求助。
 
   // —— 我的报表：打开 / 执行 / 删除 / 还原 ——
   async function openReport(id: string) {
@@ -193,7 +294,7 @@ export default function ClientPage() {
     const d = await r.json();
     if (!r.ok) { setErr(d.message || '删除失败'); return; }
     if (selId === id) { setSel(null); setSelId(''); setRepCols([]); setRepRows([]); setRepMsg(''); }
-    setMsg('已移入回收站（开发者侧不受影响）');
+    setMsg('已移入甲方回收站（开发者侧不受影响）');
     await loadBoot();
   }
 
@@ -237,16 +338,17 @@ export default function ClientPage() {
       <div className="main">
         <div className="side">
           <h4>导航</h4>
-          <div className="node" onClick={() => setTab('reports')} style={tab === 'reports' ? { background: '#eef2ff', color: 'var(--primary)' } : undefined}>
+          <div className={'node' + (tab === 'reports' ? ' on' : '')} onClick={() => setTab('reports')}>
             我的报表（{normalReports.length}）
           </div>
-          <div className="node" onClick={() => setTab('gen')} style={tab === 'gen' ? { background: '#eef2ff', color: 'var(--primary)' } : undefined}>
-            生成新报表
-          </div>
-          <div className="node bin" onClick={() => setTab('reports')}>回收站（{binReports.length}）</div>
+          <div className={'node' + (tab === 'gen' ? ' on' : '')} onClick={() => setTab('gen')}>生成新报表</div>
+          <div className={'node' + (tab === 'doc' ? ' on' : '')} onClick={() => setTab('doc')}>数据库结构文档</div>
+          <div className={'node' + (tab === 'llm' ? ' on' : '')} onClick={() => setTab('llm')}>模型配置</div>
+          <div className={'node bin' + (tab === 'bin' ? ' on' : '')} onClick={() => setTab('bin')}>回收站（{binReports.length}）</div>
           <h4>提示</h4>
-          <div className="muted" style={{ padding: '6px' }}>
-            开发者发布的报表会出现在「我的报表」；也可以自己用自然语言生成。
+          <div className="muted" style={{ padding: '6px', fontSize: 12 }}>
+            开发者发布的报表会出现在「我的报表」；也可以自己用自然语言生成。<br />
+            「数据库结构文档」可查看表与字段含义，写需求时先查一下更准。
           </div>
         </div>
         <div className="content">
@@ -259,12 +361,6 @@ export default function ClientPage() {
                     ? <div className="muted">还没有报表。可自己生成后保存，或等开发者发布。</div>
                     : normalReports.map((r) => reportRow(r, false))}
                 </div>
-                {binReports.length > 0 && (
-                  <div style={{ marginTop: 14 }}>
-                    <div className="row"><strong>回收站</strong><span className="pill rec">仅甲方侧不可见</span></div>
-                    <div style={{ marginTop: 8 }}>{binReports.map((r) => reportRow(r, true))}</div>
-                  </div>
-                )}
               </div>
 
               {sel && (
@@ -303,12 +399,25 @@ export default function ClientPage() {
             </>
           )}
 
+          {tab === 'bin' && (
+            <div className="card">
+              <div className="row"><strong>回收站（{binReports.length}）</strong><span className="pill rec">甲方自己的回收站 · 与开发者互不干扰</span></div>
+              {binReports.length === 0
+                ? <div className="muted" style={{ marginTop: 8 }}>回收站是空的。</div>
+                : <div style={{ marginTop: 8 }}>{binReports.map((r) => reportRow(r, true))}</div>}
+            </div>
+          )}
+
           {tab === 'gen' && (
             <>
               <div className="card">
                 <div className="row"><strong>① 描述需求</strong></div>
                 <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="例如：最近30天各地区的订单金额汇总，按金额降序" />
                 <div className="row" style={{ marginTop: 10 }}>
+                  <select value={providerId} onChange={(e) => setProviderId(e.target.value)} style={{ maxWidth: 240 }}>
+                    <option value="">默认模型</option>
+                    {providers.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.model}</option>)}
+                  </select>
                   <button onClick={gen} disabled={busy || !dsId}>生成 SQL</button>
                   {!dsId && (
                     <span className="err">
@@ -316,6 +425,11 @@ export default function ClientPage() {
                     </span>
                   )}
                 </div>
+                {providers.length === 0 && (
+                  <div className="muted" style={{ marginTop: 8 }}>
+                    你还没有配置模型。点「生成 SQL」会把需求描述直接提交给开发者，由开发者据此生成报表；或到「模型配置」添加你自己的模型（含本地模型）。
+                  </div>
+                )}
               </div>
 
               {sql && (
@@ -347,6 +461,62 @@ export default function ClientPage() {
                 </div>
               )}
             </>
+          )}
+
+          {tab === 'doc' && (
+            <SchemaDoc api={api} dataSources={dsList} defaultId={settings?.defaultDs ?? undefined} />
+          )}
+
+          {tab === 'llm' && (
+            <div className="card">
+              <div className="row">
+                <strong>模型配置</strong>
+                <span className="muted">这是「甲方」自己的一套模型，与开发者互不干扰；可填自己的 API Key、加本地模型、连通测试、设默认。生成报表时只会用这里的模型。</span>
+              </div>
+              <div style={{ margin: '10px 0' }}>
+                {providers.length === 0 && (
+                  <div className="muted">还没配置模型。不配也能跑，只是「生成 SQL」会降级为手工模式。</div>
+                )}
+                {providers.map((p) => (
+                  <div key={p.id} className="row" style={{ justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ minWidth: 260 }}>
+                      <strong>{p.name}</strong>
+                      {!!p.is_default && <span className="badge">默认</span>}
+                      {p.status === 'DISABLED' && <span className="pill rec">已停用</span>}
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {vendorLabel(p.vendor)} · {p.model}
+                      </div>
+                      {llmTest[p.id] && <div className="muted" style={{ fontSize: 12 }}>{llmTest[p.id]}</div>}
+                    </div>
+                    <div className="row">
+                      <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => testProviderCall(p.id)}>测试连接</button>
+                      {!p.is_default && <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => makeDefaultProvider(p.id)}>设为默认</button>}
+                      <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => toggleProvider(p)}>{p.status === 'ACTIVE' ? '停用' : '启用'}</button>
+                      <button className="danger" style={{ padding: '2px 8px' }} onClick={() => delProvider(p)}>删除</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="row">
+                <select value={llmForm.vendor} onChange={(e) => applyPreset(e.target.value)} style={{ maxWidth: 220 }}>
+                  {LLM_PRESETS.map((p) => <option key={p.vendor} value={p.vendor}>{p.label}</option>)}
+                </select>
+                <input placeholder="显示名" value={llmForm.name} onChange={(e) => setLlmForm({ ...llmForm, name: e.target.value })} />
+                <input placeholder="接口地址（endpoint）" value={llmForm.endpoint} onChange={(e) => setLlmForm({ ...llmForm, endpoint: e.target.value })} />
+                <input placeholder="模型名" list="llm-models-c" value={llmForm.model} onChange={(e) => setLlmForm({ ...llmForm, model: e.target.value })} />
+                <datalist id="llm-models-c">
+                  {(presetOf(llmForm.vendor)?.models ?? []).map((m) => <option key={m} value={m} />)}
+                </datalist>
+                <input type="password" placeholder={presetOf(llmForm.vendor)?.keyHint || 'API Key（本地模型可留空）'}
+                  value={llmForm.apiKey} onChange={(e) => setLlmForm({ ...llmForm, apiKey: e.target.value })} />
+                <label className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}>
+                  <input type="checkbox" style={{ width: 'auto' }} checked={llmForm.isDefault}
+                    onChange={(e) => setLlmForm({ ...llmForm, isDefault: e.target.checked })} />设为默认
+                </label>
+                <button onClick={createProvider}>添加模型</button>
+              </div>
+              {presetOf(llmForm.vendor)?.note && <div className="muted" style={{ marginTop: 6 }}>※ {presetOf(llmForm.vendor)?.note}</div>}
+            </div>
           )}
 
           {err && <div className="card err">⚠ {err}</div>}

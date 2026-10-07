@@ -1,14 +1,16 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import { LLM_PRESETS, presetOf, vendorLabel, initialProviderForm } from '@/lib/llm-presets';
+import SchemaDoc from '@/components/SchemaDoc';
 
-interface Boot { app: any; role: string; settings: any; reports: any[]; tagTree: any[]; dataSources: any[]; }
+interface Boot { app: any; role: string; settings: any; reports: any[]; tagTree: any[]; dataSources: any[]; llmProviders?: any[]; }
 
 export default function DevPage() {
   const { appPath } = useParams<{ appPath: string }>();
   const api = `/${appPath}/d/api`;
   const [boot, setBoot] = useState<Boot | null>(null);
-  const [tab, setTab] = useState<'ds' | 'reports' | 'apps' | 'req'>('ds');
+  const [tab, setTab] = useState<'ds' | 'reports' | 'bin' | 'apps' | 'req' | 'llm' | 'doc'>('ds');
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
 
@@ -16,6 +18,9 @@ export default function DevPage() {
   const [dsForm, setDsForm] = useState({ name: '', host: '127.0.0.1', port: 3306, database_name: 'biz_demo', username: 'report_ro', password: 'ReportRo@2026' });
   const [dsList, setDsList] = useState<any[]>([]);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
+  // 删除被占用源时的「改派并删除」交互
+  const [reassign, setReassign] = useState<{ id: string; name: string } | null>(null);
+  const [reassignTarget, setReassignTarget] = useState('');
 
   // 报表编辑
   const [selReport, setSelReport] = useState<any>(null);
@@ -30,12 +35,32 @@ export default function DevPage() {
   const [prevRows, setPrevRows] = useState<any[]>([]);
   const [prevMsg, setPrevMsg] = useState('');
 
+  // 数据库结构文档（当前查看的数据源；不传则用应用默认）
+  const [docDs, setDocDs] = useState<string>('');
+
   // 应用管理
   const [apps, setApps] = useState<any[]>([]);
   const [appForm, setAppForm] = useState({ name: '', pathPrefix: '' });
 
+  // 模型配置（国内厂商 + 本地模型）
+  const [providers, setProviders] = useState<any[]>([]);
+  const [llmForm, setLlmForm] = useState(() => initialProviderForm(true));
+  const [llmTest, setLlmTest] = useState<Record<string, string>>({});
+
   // 需求
   const [reqs, setReqs] = useState<any[]>([]);
+  // 据此需求生成 SQL（开发者用自己配置的模型）：内联生成器状态
+  const [genReq, setGenReq] = useState<any>(null);
+  const [reqPrompt, setReqPrompt] = useState('');
+  const [reqDsId, setReqDsId] = useState('');
+  const [reqProviderId, setReqProviderId] = useState('');
+  const [reqSql, setReqSql] = useState('');
+  const [reqUnderstanding, setReqUnderstanding] = useState('');
+  const [reqCols, setReqCols] = useState<string[]>([]);
+  const [reqRows, setReqRows] = useState<any[]>([]);
+  const [reqPrevMsg, setReqPrevMsg] = useState('');
+  const [reqReportName, setReqReportName] = useState('');
+  const [reqBusy, setReqBusy] = useState(false);
 
   async function load() {
     setErr('');
@@ -45,6 +70,7 @@ export default function DevPage() {
     setBoot(d);
     setDsList(d.dataSources || []);
     setReports(d.reports || []);
+    setProviders(d.llmProviders || []);
     // 新建报表的数据源默认取应用默认数据源
     setNewForm((f) => (f.dataSourceId ? f : { ...f, dataSourceId: d.settings?.defaultDs ?? '' }));
     if (d.app.isPlatformRoot) {
@@ -53,6 +79,11 @@ export default function DevPage() {
     }
   }
   useEffect(() => { load(); }, [api]);
+  // 支持 /{app}/d?tab=doc 直达结构文档
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    if (t === 'doc' || t === 'reports' || t === 'llm' || t === 'ds') setTab(t);
+  }, []);
 
   async function createDs() {
     setErr('');
@@ -75,6 +106,48 @@ export default function DevPage() {
     if (!r.ok) { setErr(d.message || '设置失败'); return; }
     setMsg('已设为默认数据源'); await load();
   }
+  async function delDs(d: any) {
+    if (!confirm(`确认删除数据源「${d.name}」？\n${boot?.settings?.defaultDs === d.id ? '（它是当前默认数据源，删除后将自动回落到其他数据源）' : ''}`)) return;
+    setErr(''); setMsg('');
+    try {
+      const r = await fetch(`${api}/data-sources/${d.id}`, { method: 'DELETE' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        // 被引用：转入「改派并删除」流程，让用户选一个同源目标源
+        if (j.code === 'DATA_SOURCE_IN_USE') {
+          setReassign({ id: d.id, name: d.name });
+          setReassignTarget('');
+          return;
+        }
+        setErr(j.message || '删除失败'); return;
+      }
+      setMsg(j.defaultDsChanged ? '已删除，默认数据源已自动回落' : '已删除数据源');
+      if (docDs === d.id) setDocDs('');
+      await load();
+    } catch (e: any) { setErr('删除失败：' + e.message); }
+  }
+  // 改派关联记录到另一同源源后删除（合并重复数据源）
+  async function delDsWithTarget() {
+    if (!reassign) return;
+    if (!reassignTarget) { setErr('请选择改派目标数据源'); return; }
+    setErr(''); setMsg('');
+    try {
+      const r = await fetch(`${api}/data-sources/${reassign.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetDsId: reassignTarget }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(j.message || '删除失败'); return; }
+      const tName = dsList.find((x) => x.id === reassignTarget)?.name ?? '';
+      setMsg(j.reassignedCount
+        ? `已把 ${j.reassignedCount} 条关联记录改派到「${tName}」并删除「${reassign.name}」`
+        : `已删除数据源「${reassign.name}」`);
+      setReassign(null); setReassignTarget('');
+      if (docDs === reassign.id) setDocDs('');
+      await load();
+    } catch (e: any) { setErr('删除失败：' + e.message); }
+  }
   async function openReport(id: string) {
     const r = await fetch(`${api}/reports/${id}`, { cache: 'no-store' });
     const d = await r.json();
@@ -89,6 +162,25 @@ export default function DevPage() {
     if (!r.ok) { setErr(d.message); return; }
     setMsg('SQL 已更新，甲方刷新即见新结果（REQ-COL-03）'); load();
   }
+  // 开发者回收站：删除=移入开发者回收站（developer_state=RECYCLED），甲方侧不受影响
+  async function delReport(id: string) {
+    if (!confirm('确认移入开发者回收站？开发者与甲方各有各的回收站，本操作只影响开发者侧，甲方仍可见。')) return;
+    setErr(''); setMsg('');
+    const r = await fetch(`${api}/reports/${id}/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const d = await r.json();
+    if (!r.ok) { setErr(d.message || '删除失败'); return; }
+    if (selReport?.id === id) { setSelReport(null); setEditSql(''); }
+    setMsg('已移入开发者回收站（甲方侧不受影响）');
+    await load();
+  }
+  async function restoreRep(id: string) {
+    setErr(''); setMsg('');
+    const r = await fetch(`${api}/reports/${id}/restore`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const d = await r.json();
+    if (!r.ok) { setErr(d.message || '还原失败'); return; }
+    setMsg('已还原到开发者报表列表');
+    await load();
+  }
   // SQL 里的 {{name}} 占位符（网关会校验只允许出现在值位置）
   const phNames = Array.from(
     new Set(Array.from(newForm.sqlText.matchAll(/\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g)).map((m) => m[1])),
@@ -98,6 +190,11 @@ export default function DevPage() {
   const effDsId = newForm.dataSourceId || boot?.settings?.defaultDs || '';
   const selDs = dsList.find((d) => d.id === effDsId);
   const selDsName = selDs ? `${selDs.name} · ${selDs.database_name}` : '（该应用还没有数据源）';
+
+  // 开发者回收站：以 developer_state 判断（与 deleteReport/restoreReport 的 developer track 对应）
+  const inDevBin = (r: any) => r.developer_state === 'RECYCLED';
+  const normalReports = reports.filter((r) => !inDevBin(r));
+  const binReports = reports.filter(inDevBin);
 
   async function previewNew() {
     setErr(''); setMsg(''); setPrevMsg(''); setBusy(true);
@@ -145,17 +242,159 @@ export default function DevPage() {
     if (!r.ok) { setErr(d.message); return; }
     setMsg('应用已创建'); load();
   }
-  async function disableApp(id: string) {
-    const r = await fetch(`${api}/applications/${id}:disable`, { method: 'POST' });
-    const d = await r.json();
-    if (!r.ok) { setErr(d.message); return; }
-    setMsg('应用已停用'); load();
+  async function setAppStatus(a: any, next: 'DISABLED' | 'ACTIVE') {
+    const word = next === 'DISABLED' ? '停用' : '启用';
+    if (!confirm(`确认${word}应用「${a.name}」？（/${a.path_prefix}）`)) return;
+    setErr(''); setMsg('');
+    try {
+      const r = await fetch(`${api}/applications/${a.id}/${next === 'DISABLED' ? 'disable' : 'enable'}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.message || `${word}失败（HTTP ${r.status}）`); return; }
+      setMsg(`应用「${a.name}」已${word}`);
+      load();
+    } catch (e: any) { setErr(`${word}失败：` + e.message); }
   }
   async function loadReqs() {
     const r = await fetch(`${api}/requirements`, { cache: 'no-store' });
     setReqs((await r.json()).requirements || []);
   }
   useEffect(() => { if (tab === 'req') loadReqs(); }, [tab]);
+
+  // 点击需求卡片的「据此生成 SQL」：用该需求的描述预填内联生成器
+  function startGenFromReq(q: any) {
+    setErr(''); setMsg('');
+    setGenReq(q);
+    setReqPrompt(q.prompt || q.client_note || '');
+    setReqDsId(boot?.settings?.defaultDs ?? (dsList[0]?.id ?? ''));
+    setReqProviderId(''); // 空=开发者默认模型
+    setReqSql(''); setReqUnderstanding(''); setReqCols([]); setReqRows([]); setReqPrevMsg('');
+    setReqReportName((q.prompt || '需求报表').slice(0, 24));
+  }
+
+  async function genFromReq() {
+    setErr(''); setReqBusy(true);
+    try {
+      const r = await fetch(`${api}/reports/generate`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: reqPrompt, dataSourceId: reqDsId || undefined, providerId: reqProviderId || undefined }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.message || '生成失败');
+      setReqSql(d.sql ?? '');
+      setReqUnderstanding(d.understanding ?? (d.reason ? '降级手工模式：' + d.reason : ''));
+      setReqCols([]); setReqRows([]); setReqPrevMsg('');
+      if (d.mode === 'manual') setErr('生成失败：' + (d.reason || '请检查开发者模型配置，或直接在下方手写 SQL'));
+    } catch (e: any) { setErr(e.message); } finally { setReqBusy(false); }
+  }
+
+  async function previewReq() {
+    setErr(''); setReqBusy(true); setReqPrevMsg('');
+    try {
+      const r = await fetch(`${api}/reports/preview`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql: reqSql, dataSourceId: reqDsId || undefined, params: {} }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setErr(`查询失败：${d.code}${d.message && d.message !== d.code ? ' — ' + d.message : ''}`); setReqCols([]); setReqRows([]); return; }
+      setReqCols(d.columns || []); setReqRows(d.rows || []);
+      setReqPrevMsg(d.rows.length ? `预览成功 · ${d.rows.length} 行（上限 200）` : '查询成功，但返回 0 行');
+    } catch (e: any) { setErr(e.message); } finally { setReqBusy(false); }
+  }
+
+  async function saveReqReport() {
+    if (!reqSql?.trim()) { setErr('还没有 SQL，无法保存'); return; }
+    setErr(''); setReqBusy(true);
+    try {
+      // 1) 保存为报表（开发者/甲方共享，甲方端立即可见）
+      const r = await fetch(`${api}/reports`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: reqReportName || '需求报表', sqlText: reqSql, dataSourceId: reqDsId || undefined }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.message || '保存失败');
+      const reportId = d.id;
+      // 2) 标记需求完成并回填报表 id，通知甲方
+      await fetch(`${api}/requirements/${genReq.id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reportId }),
+      });
+      setMsg(`报表「${reqReportName || '需求报表'}」已保存并通知甲方，需求已标记完成`);
+      setGenReq(null); setReqSql(''); setReqCols([]); setReqRows([]); setReqPrevMsg('');
+      await loadReqs();
+    } catch (e: any) { setErr(e.message); } finally { setReqBusy(false); }
+  }
+
+  // —— 模型配置 ——
+  function applyPreset(vendor: string) {
+    const p = LLM_PRESETS.find((x) => x.vendor === vendor);
+    setLlmForm((f) => ({
+      ...f,
+      vendor,
+      endpoint: p?.endpoint ?? f.endpoint,
+      model: p?.models?.[0] ?? f.model,
+      name: p ? p.label : f.name,
+    }));
+  }
+
+  async function createProvider() {
+    setErr(''); setMsg('');
+    if (!llmForm.name || !llmForm.endpoint || !llmForm.model) { setErr('请填写模型名称、接口地址与模型名'); return; }
+    try {
+      const r = await fetch(`${api}/llm-providers`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: llmForm.name, vendor: llmForm.vendor, endpoint: llmForm.endpoint,
+          model: llmForm.model, apiKey: llmForm.apiKey || null, isDefault: llmForm.isDefault,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.message || `新增失败（HTTP ${r.status}）`); return; }
+      setMsg(`模型「${llmForm.name}」已添加${llmForm.isDefault ? '，并设为默认' : ''}`);
+      setLlmForm(initialProviderForm(false));
+      await load();
+    } catch (e: any) { setErr('新增失败：' + e.message); }
+  }
+
+  async function testProviderCall(id: string, tmpKey?: string) {
+    setErr(''); setMsg(''); setLlmTest((p) => ({ ...p, [id]: '测试中…' }));
+    try {
+      const r = await fetch(`${api}/llm-providers/${id}/test`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tmpKey ? { apiKey: tmpKey } : {}),
+      });
+      const d = await r.json().catch(() => ({}));
+      setLlmTest((p) => ({ ...p, [id]: d.ok ? `✓ ${d.message || '连通成功'}` : `✗ ${d.message || '连通失败'}` }));
+    } catch (e: any) { setLlmTest((p) => ({ ...p, [id]: '✗ ' + e.message })); }
+  }
+
+  async function makeDefaultProvider(id: string) {
+    setErr(''); setMsg('');
+    const r = await fetch(`${api}/llm-providers/${id}/default`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { setErr(d.message || '设置失败'); return; }
+    setMsg('已设为默认模型'); await load();
+  }
+
+  async function toggleProvider(p: any) {
+    setErr(''); setMsg('');
+    const next = p.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
+    const r = await fetch(`${api}/llm-providers/${p.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: next }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { setErr(d.message || '操作失败'); return; }
+    setMsg(next === 'ACTIVE' ? '已启用' : '已停用'); await load();
+  }
+
+  async function delProvider(p: any) {
+    if (!confirm(`确认删除模型「${p.name}」？`)) return;
+    setErr(''); setMsg('');
+    const r = await fetch(`${api}/llm-providers/${p.id}`, { method: 'DELETE' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { setErr(d.message || '删除失败'); return; }
+    setMsg('已删除'); await load();
+  }
 
   if (!boot) return <div className="layout"><div className="topbar"><span className="app-name">加载中…</span></div></div>;
 
@@ -169,10 +408,13 @@ export default function DevPage() {
       <div className="main">
         <div className="side">
           <h4>导航</h4>
-          <div className={'node' + (tab === 'ds' ? ' badge' : '')} onClick={() => setTab('ds')}>数据源</div>
-          <div className={'node' + (tab === 'reports' ? ' badge' : '')} onClick={() => setTab('reports')}>报表</div>
-          {boot.app.isPlatformRoot && <div className={'node' + (tab === 'apps' ? ' badge' : '')} onClick={() => setTab('apps')}>应用管理</div>}
-          <div className={'node' + (tab === 'req' ? ' badge' : '')} onClick={() => setTab('req')}>需求收件箱</div>
+          <div className={'node' + (tab === 'ds' ? ' on' : '')} onClick={() => setTab('ds')}>数据源</div>
+          <div className={'node' + (tab === 'doc' ? ' on' : '')} onClick={() => setTab('doc')}>数据库结构文档</div>
+          <div className={'node' + (tab === 'reports' ? ' on' : '')} onClick={() => setTab('reports')}>报表（{normalReports.length}）</div>
+          <div className={'node' + (tab === 'bin' ? ' on' : '')} onClick={() => setTab('bin')}>回收站（{binReports.length}）</div>
+          <div className={'node' + (tab === 'llm' ? ' on' : '')} onClick={() => setTab('llm')}>模型配置</div>
+          {boot.app.isPlatformRoot && <div className={'node' + (tab === 'apps' ? ' on' : '')} onClick={() => setTab('apps')}>应用管理</div>}
+          <div className={'node' + (tab === 'req' ? ' on' : '')} onClick={() => setTab('req')}>需求收件箱</div>
         </div>
         <div className="content">
           {err && <div className="card err">⚠ {err}</div>}
@@ -190,11 +432,31 @@ export default function DevPage() {
                     {boot?.settings?.defaultDs !== d.id && (
                       <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => makeDefault(d.id)}>设为默认</button>
                     )}
+                    <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => { setDocDs(d.id); setTab('doc'); }}>结构文档</button>
+                    <button className="danger" style={{ padding: '2px 8px' }} onClick={() => delDs(d)}>删除</button>
                     <span className="muted">{testResult[d.id] || ''}</span>
                   </div>
                 ))}
                 {dsList.length === 0 && <span className="muted">还没有数据源，请先在下方新建。</span>}
               </div>
+
+              {reassign && (
+                <div className="card err" style={{ marginTop: 12 }}>
+                  <strong>数据源「{reassign.name}」被报表 / 运行记录引用，无法直接删除。</strong>
+                  <div className="row" style={{ marginTop: 10 }}>
+                    <span className="muted">把它关联的记录改派到：</span>
+                    <select value={reassignTarget} onChange={(e) => setReassignTarget(e.target.value)} style={{ maxWidth: 320 }}>
+                      <option value="">（请选择目标数据源）</option>
+                      {dsList.filter((x) => x.id !== reassign.id).map((x) => (
+                        <option key={x.id} value={x.id}>{x.name} · {x.database_name}</option>
+                      ))}
+                    </select>
+                    <button className="danger" onClick={delDsWithTarget} disabled={!reassignTarget}>改派并删除</button>
+                    <button className="ghost" onClick={() => { setReassign(null); setReassignTarget(''); }}>取消</button>
+                  </div>
+                  <div className="muted" style={{ marginTop: 6 }}>改派后该数据源会被彻底删除；目标源须为本应用内其他可用数据源。</div>
+                </div>
+              )}
               <div className="row">
                 <input placeholder="名称" value={dsForm.name} onChange={(e) => setDsForm({ ...dsForm, name: e.target.value })} />
                 <input placeholder="库名" value={dsForm.database_name} onChange={(e) => setDsForm({ ...dsForm, database_name: e.target.value })} />
@@ -204,6 +466,15 @@ export default function DevPage() {
               </div>
               <div className="muted" style={{ marginTop: 6 }}>只读账号示例：report_ro / ReportRo@2026（仅 SELECT）。M0 验收：测试连接后 INSERT 应失败。</div>
             </div>
+          )}
+
+          {tab === 'doc' && (
+            <SchemaDoc
+              key={docDs || 'default'}
+              api={api}
+              dataSources={dsList}
+              defaultId={docDs || boot?.settings?.defaultDs || undefined}
+            />
           )}
 
           {tab === 'reports' && (
@@ -286,12 +557,16 @@ export default function DevPage() {
               </div>
 
               <div className="card">
-                <strong>已有报表（{reports.length}）</strong>
-                <div className="row" style={{ margin: '10px 0' }}>
-                  {reports.map((r) => (
-                    <button key={r.id} className="ghost" onClick={() => openReport(r.id)}>{r.name}</button>
-                  ))}
-                  {reports.length === 0 && <span className="muted">还没有报表。</span>}
+                <strong>已有报表（{normalReports.length}）</strong>
+                <div style={{ marginTop: 8 }}>
+                  {normalReports.length === 0
+                    ? <span className="muted">还没有报表。</span>
+                    : normalReports.map((r) => (
+                      <div className="row" key={r.id} style={{ justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                        <button className="ghost" style={{ border: 'none', background: 'transparent', padding: 0 }} onClick={() => openReport(r.id)}>{r.name}</button>
+                        <button className="danger" style={{ padding: '2px 8px' }} onClick={() => delReport(r.id)}>删除</button>
+                      </div>
+                    ))}
                 </div>
                 {selReport && (
                   <div>
@@ -310,6 +585,74 @@ export default function DevPage() {
             </>
           )}
 
+          {tab === 'bin' && (
+            <div className="card">
+              <div className="row"><strong>回收站（{binReports.length}）</strong><span className="pill rec">开发者自己的回收站 · 与甲方互不干扰</span></div>
+              {binReports.length === 0
+                ? <div className="muted" style={{ marginTop: 8 }}>回收站是空的。</div>
+                : <div style={{ marginTop: 8 }}>
+                    {binReports.map((r) => (
+                      <div className="row" key={r.id} style={{ justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                        <span style={{ cursor: 'pointer' }} onClick={() => openReport(r.id)}>{r.name}</span>
+                        <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => restoreRep(r.id)}>还原</button>
+                      </div>
+                    ))}
+                  </div>}
+            </div>
+          )}
+
+          {tab === 'llm' && (
+            <div className="card">
+              <div className="row">
+                <strong>模型配置</strong>
+                <span className="muted">国内主流厂商 + 本地模型，统一 OpenAI 兼容协议；密钥 AES 加密入库，接口永不回显</span>
+              </div>
+              <div style={{ margin: '10px 0' }}>
+                {providers.length === 0 && (
+                  <div className="muted">还没配置模型。不配也能跑，只是「生成 SQL」会降级为手工模式。</div>
+                )}
+                {providers.map((p) => (
+                  <div key={p.id} className="row" style={{ justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ minWidth: 260 }}>
+                      <strong>{p.name}</strong>
+                      {!!p.is_default && <span className="badge">默认</span>}
+                      {p.status === 'DISABLED' && <span className="pill rec">已停用</span>}
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {vendorLabel(p.vendor)} · {p.model} · {p.endpoint} · {p.has_key ? '已配置密钥' : '无密钥（本地）'}
+                      </div>
+                      {llmTest[p.id] && <div className="muted" style={{ fontSize: 12 }}>{llmTest[p.id]}</div>}
+                    </div>
+                    <div className="row">
+                      <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => testProviderCall(p.id)}>测试连接</button>
+                      {!p.is_default && <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => makeDefaultProvider(p.id)}>设为默认</button>}
+                      <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => toggleProvider(p)}>{p.status === 'ACTIVE' ? '停用' : '启用'}</button>
+                      <button className="danger" style={{ padding: '2px 8px' }} onClick={() => delProvider(p)}>删除</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="row">
+                <select value={llmForm.vendor} onChange={(e) => applyPreset(e.target.value)} style={{ maxWidth: 220 }}>
+                  {LLM_PRESETS.map((p) => <option key={p.vendor} value={p.vendor}>{p.label}</option>)}
+                </select>
+                <input placeholder="显示名" value={llmForm.name} onChange={(e) => setLlmForm({ ...llmForm, name: e.target.value })} />
+                <input placeholder="接口地址（endpoint）" value={llmForm.endpoint} onChange={(e) => setLlmForm({ ...llmForm, endpoint: e.target.value })} />
+                <input placeholder="模型名" list="llm-models" value={llmForm.model} onChange={(e) => setLlmForm({ ...llmForm, model: e.target.value })} />
+                <datalist id="llm-models">
+                  {(presetOf(llmForm.vendor)?.models ?? []).map((m) => <option key={m} value={m} />)}
+                </datalist>
+                <input type="password" placeholder={presetOf(llmForm.vendor)?.keyHint || 'API Key（本地模型可留空）'}
+                  value={llmForm.apiKey} onChange={(e) => setLlmForm({ ...llmForm, apiKey: e.target.value })} />
+                <label className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}>
+                  <input type="checkbox" style={{ width: 'auto' }} checked={llmForm.isDefault}
+                    onChange={(e) => setLlmForm({ ...llmForm, isDefault: e.target.checked })} />设为默认
+                </label>
+                <button onClick={createProvider}>添加模型</button>
+              </div>
+              {presetOf(llmForm.vendor)?.note && <div className="muted" style={{ marginTop: 6 }}>※ {presetOf(llmForm.vendor)?.note}</div>}
+            </div>
+          )}
+
           {tab === 'apps' && boot.app.isPlatformRoot && (
             <div className="card">
               <strong>应用管理（平台根）</strong>
@@ -317,7 +660,10 @@ export default function DevPage() {
                 {apps.map((a) => (
                   <div key={a.id} className="pill" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     {a.name} · /{a.path_prefix}
-                    {!a.is_platform_root && <button className="danger" style={{ padding: '2px 8px' }} onClick={() => disableApp(a.id)}>停用</button>}
+                    {a.is_platform_root && <span className="badge">平台根</span>}
+                    {a.status === 'DISABLED'
+                      ? <><span className="pill rec">已停用</span><button className="ghost" style={{ padding: '2px 8px' }} onClick={() => setAppStatus(a, 'ACTIVE')}>启用</button></>
+                      : (!a.is_platform_root && <button className="danger" style={{ padding: '2px 8px' }} onClick={() => setAppStatus(a, 'DISABLED')}>停用</button>)}
                   </div>
                 ))}
               </div>
@@ -332,12 +678,64 @@ export default function DevPage() {
           {tab === 'req' && (
             <div className="card">
               <strong>需求收件箱（{reqs.length}）</strong>
+              {reqs.length === 0 && <div className="muted">暂无需求。甲方在未配置模型时点「生成 SQL」，需求会自动出现在这里。</div>}
               {reqs.map((q) => (
                 <div key={q.id} className="card" style={{ margin: '8px 0' }}>
-                  <div className="row"><span className="pill">{q.status}</span><span className="muted">{q.prompt || q.client_note || ''}</span></div>
+                  <div className="row" style={{ justifyContent: 'space-between' }}>
+                    <div className="row"><span className="pill">{q.status}</span><span className="muted">{q.prompt || q.client_note || ''}</span></div>
+                    <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => startGenFromReq(q)} disabled={!!genReq}>据此生成 SQL</button>
+                  </div>
                   {q.failed_sql && <div className="code">{q.failed_sql}</div>}
                 </div>
               ))}
+
+              {genReq && (
+                <div className="card" style={{ margin: '12px 0', border: '1px solid var(--border)' }}>
+                  <div className="row"><strong>据此需求生成 SQL</strong><span className="muted">{genReq.prompt?.slice(0, 30)}</span></div>
+                  {providers.length === 0 && (
+                    <div className="muted" style={{ marginTop: 6 }}>你还没有配置开发者模型（请到「模型配置」添加），将无法自动生成，可改为在下方直接写 SQL。</div>
+                  )}
+                  <textarea value={reqPrompt} onChange={(e) => setReqPrompt(e.target.value)} placeholder="需求描述（可补充）" style={{ marginTop: 8 }} />
+                  <div className="row" style={{ marginTop: 8 }}>
+                    <select value={reqDsId} onChange={(e) => setReqDsId(e.target.value)} style={{ maxWidth: 240 }}>
+                      {dsList.length === 0 && <option value="">（无数据源）</option>}
+                      {dsList.map((d) => <option key={d.id} value={d.id}>{d.name} · {d.database_name}</option>)}
+                    </select>
+                    <select value={reqProviderId} onChange={(e) => setReqProviderId(e.target.value)} style={{ maxWidth: 240 }}>
+                      <option value="">默认模型</option>
+                      {providers.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.model}</option>)}
+                    </select>
+                    <button onClick={genFromReq} disabled={reqBusy}>生成 SQL</button>
+                  </div>
+
+                  {reqSql && (
+                    <div className="card" style={{ marginTop: 10 }}>
+                      <div className="row"><strong>② 生成的 SQL</strong>{reqUnderstanding && <span className="muted">{reqUnderstanding}</span>}</div>
+                      <div className="code">{reqSql}</div>
+                      <div className="row" style={{ marginTop: 8 }}>
+                        <button className="ghost" onClick={previewReq} disabled={reqBusy}>预览（≤200 行）</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {reqCols.length > 0 && (
+                    <div className="card" style={{ marginTop: 10 }}>
+                      <strong>③ 预览结果（{reqRows.length} 行）</strong>
+                      <div className="table-wrap" style={{ marginTop: 8 }}>
+                        <table><thead><tr>{reqCols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+                          <tbody>{reqRows.map((r, i) => <tr key={i}>{reqCols.map((c) => <td key={c}>{String(r[c] ?? '')}</td>)}</tr>)}</tbody>
+                        </table>
+                      </div>
+                      <div className="row" style={{ marginTop: 8 }}>
+                        <input style={{ maxWidth: 240 }} placeholder="报表名称" value={reqReportName} onChange={(e) => setReqReportName(e.target.value)} />
+                        <button className="ghost" onClick={saveReqReport} disabled={reqBusy}>保存为报表并通知甲方</button>
+                        <button className="danger" style={{ padding: '2px 8px' }} onClick={() => { setGenReq(null); setReqSql(''); setReqCols([]); setReqRows([]); }}>取消</button>
+                      </div>
+                    </div>
+                  )}
+                  {reqPrevMsg && <div className="muted" style={{ marginTop: 6 }}>{reqPrevMsg}</div>}
+                </div>
+              )}
             </div>
           )}
         </div>
