@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { LLM_PRESETS, presetOf, vendorLabel, initialProviderForm } from '@/lib/llm-presets';
 import SchemaDoc from '@/components/SchemaDoc';
@@ -56,11 +56,30 @@ export default function DevPage() {
   const [reqProviderId, setReqProviderId] = useState('');
   const [reqSql, setReqSql] = useState('');
   const [reqUnderstanding, setReqUnderstanding] = useState('');
+  // 多库都有同名/相似表时的候选库（生成后由开发者选择用哪个库）
+  const [reqCandidates, setReqCandidates] = useState<any[]>([]);
   const [reqCols, setReqCols] = useState<string[]>([]);
   const [reqRows, setReqRows] = useState<any[]>([]);
   const [reqPrevMsg, setReqPrevMsg] = useState('');
   const [reqReportName, setReqReportName] = useState('');
   const [reqBusy, setReqBusy] = useState(false);
+  // 生成中的独立加载态（切菜单不丢失）+ 取消能力
+  const [reqGenLoading, setReqGenLoading] = useState(false);
+  const [reqCancelled, setReqCancelled] = useState(false);
+  const [reqStopped, setReqStopped] = useState(false);
+  const [reqStage, setReqStage] = useState('');
+  const reqAbortRef = useRef<AbortController | null>(null);
+  const reqTaskRef = useRef<string>('');
+  const reqStageTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startReqStages = () => {
+    const stages = ['正在读取各数据库表结构…', '正在生成 SQL…', '正在校验表名与字段…'];
+    let i = 0;
+    setReqStage(stages[0]);
+    reqStageTimer.current = setInterval(() => { i = (i + 1) % stages.length; setReqStage(stages[i]); }, 1400);
+  };
+  const stopReqStages = () => {
+    if (reqStageTimer.current) { clearInterval(reqStageTimer.current); reqStageTimer.current = null; }
+  };
 
   async function load() {
     setErr('');
@@ -274,19 +293,72 @@ export default function DevPage() {
   }
 
   async function genFromReq() {
-    setErr(''); setReqBusy(true);
+    setErr(''); setReqGenLoading(true); setReqCancelled(false); setReqStopped(false);
+    setReqCandidates([]); setReqSql(''); setReqUnderstanding(''); setReqCols([]); setReqRows([]); setReqPrevMsg('');
+    startReqStages();
+    const ctrl = new AbortController();
+    reqAbortRef.current = ctrl;
+    // 任务 id：后端据此定位并中断本次模型调用（「停止生成」用）
+    const taskId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    reqTaskRef.current = taskId;
     try {
       const r = await fetch(`${api}/reports/generate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: reqPrompt, dataSourceId: reqDsId || undefined, providerId: reqProviderId || undefined }),
+        body: JSON.stringify({
+          prompt: reqPrompt,
+          // 跨本应用所有已连接的库生成；后端会标明每个表属于哪个库
+          dataSourceIds: dsList.map((d) => d.id),
+          providerId: reqProviderId || undefined,
+          taskId,
+        }),
+        signal: ctrl.signal,
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.message || '生成失败');
+      setReqCancelled(false); setReqStopped(false);
       setReqSql(d.sql ?? '');
       setReqUnderstanding(d.understanding ?? (d.reason ? '降级手工模式：' + d.reason : ''));
+      // 每个库各生成一条 SQL → 给候选让开发者选用哪个库的；单库则直接定下数据源
+      setReqCandidates(d.results ?? []);
+      setReqDsId(d.results?.[0]?.dataSourceId ?? d.dataSourceId ?? '');
       setReqCols([]); setReqRows([]); setReqPrevMsg('');
       if (d.mode === 'manual') setErr('生成失败：' + (d.reason || '请检查开发者模型配置，或直接在下方手写 SQL'));
-    } catch (e: any) { setErr(e.message); } finally { setReqBusy(false); }
+    } catch (e: any) {
+      if (e.name === 'AbortError') { setReqCancelled(true); return; }
+      setErr(e.message);
+    } finally {
+      stopReqStages();
+      setReqGenLoading(false);
+      reqAbortRef.current = null;
+    }
+  }
+
+  // 取消正在进行的生成（AbortController 中断 fetch，前端立即停止等待）
+  function cancelReqGen() {
+    if (reqStageTimer.current) stopReqStages();
+    reqAbortRef.current?.abort();
+    setReqCancelled(true);
+    setReqGenLoading(false);
+    reqAbortRef.current = null;
+  }
+
+  // 停止生成：调后端取消端点真正中断模型调用（省算力），同时停止本页等待
+  async function stopReqGen() {
+    const taskId = reqTaskRef.current;
+    stopReqStages();
+    try {
+      if (taskId) {
+        await fetch(`${api}/reports/generate/cancel`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId }),
+        });
+      }
+    } catch { /* 取消请求失败不影响前端停止 */ }
+    reqAbortRef.current?.abort();
+    reqAbortRef.current = null;
+    reqTaskRef.current = '';
+    setReqStopped(true);
+    setReqGenLoading(false);
   }
 
   async function previewReq() {
@@ -705,10 +777,59 @@ export default function DevPage() {
                       <option value="">默认模型</option>
                       {providers.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.model}</option>)}
                     </select>
-                    <button onClick={genFromReq} disabled={reqBusy}>生成 SQL</button>
+                    <button onClick={genFromReq} disabled={reqGenLoading}>生成 SQL</button>
                   </div>
 
-                  {reqSql && (
+                  {reqGenLoading && (
+                    <div className="card gen-loading" style={{ marginTop: 10 }}>
+                      <div className="gen-status">
+                        <span className="gen-spinner" />
+                        <strong>正在生成 SQL</strong>
+                      </div>
+                      <div className="gen-progress" />
+                      <div className="gen-stage">{reqStage}</div>
+                      <div className="row">
+                        <button className="danger" onClick={stopReqGen}>停止生成</button>
+                        <button className="ghost" onClick={cancelReqGen}>仅取消等待</button>
+                      </div>
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        「停止生成」会中断后端模型调用（不再消耗算力）；「仅取消等待」只停止本页等待，模型仍会在服务端跑完。
+                        生成期间可切到左侧其他菜单，回来后若已完成会直接显示结果。
+                      </div>
+                    </div>
+                  )}
+
+                  {reqStopped && !reqGenLoading && (
+                    <div className="card row" style={{ marginTop: 10, justifyContent: 'space-between' }}>
+                      <span className="muted">已停止生成，模型调用已中断（不再消耗算力）。可重新生成。</span>
+                      <button onClick={genFromReq}>重新生成</button>
+                    </div>
+                  )}
+
+                  {reqCancelled && !reqGenLoading && !reqStopped && (
+                    <div className="card row" style={{ marginTop: 10, justifyContent: 'space-between' }}>
+                      <span className="muted">已停止本页等待（模型仍在服务端跑完）。可重新生成，或直接在下方手动编写 SQL。</span>
+                      <button onClick={genFromReq}>重新生成</button>
+                    </div>
+                  )}
+
+                  {!reqGenLoading && !reqCancelled && !reqStopped && reqCandidates.length > 1 && (
+                    <div className="card" style={{ marginTop: 10 }}>
+                      <div className="row"><strong>多个数据库都能满足这个需求</strong><span className="pill">请选择用哪个库的 SQL</span></div>
+                      <div className="row" style={{ marginTop: 8 }}>
+                        {reqCandidates.map((c) => (
+                          <button key={c.dataSourceId} className={reqDsId === c.dataSourceId ? '' : 'ghost'} onClick={() => { setReqDsId(c.dataSourceId); setReqSql(c.sql); }}>
+                            {c.name} · {c.databaseName} <span className="muted">（{c.tables.join(', ')}）</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+                        不同库的表名/字段不同，生成的 SQL 也不同。选好后点「预览」确认数据，再保存。
+                      </div>
+                    </div>
+                  )}
+
+                  {!reqGenLoading && !reqCancelled && !reqStopped && reqSql && (
                     <div className="card" style={{ marginTop: 10 }}>
                       <div className="row"><strong>② 生成的 SQL</strong>{reqUnderstanding && <span className="muted">{reqUnderstanding}</span>}</div>
                       <div className="code">{reqSql}</div>

@@ -259,3 +259,15 @@ SQL 模板 + 参数值
 - **仅只读查询**：不支持存储过程、临时表、跨库 JOIN；复杂报表需走视图或数仓预建。
 - **不做图表可视化**：一期为表格 + 导出，无图表、仪表盘、定时调度与订阅推送。
 - 报表名在应用内全局唯一，已 `PURGED` 的报表同样占用名称。
+
+
+## 其他
+
+- 在VSCode、CodeBuddy、Trae CN等开发工具的配置设置里，Git提交中英文注释生成模版配置如下:
+  ```
+    "github.copilot.chat.commitMessageGeneration.instructions": [
+        {
+            "file": ".workbuddy/rules/git-commit-message.md"
+        }
+    ]
+  ```

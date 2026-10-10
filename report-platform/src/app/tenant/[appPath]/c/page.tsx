@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { LLM_PRESETS, presetOf, vendorLabel, initialProviderForm } from '@/lib/llm-presets';
 import SchemaDoc, { type DsLite } from '@/components/SchemaDoc';
@@ -137,22 +137,63 @@ export default function ClientPage() {
     setMsg('已删除'); await loadBoot();
   }
 
+  // 生成结果落库：多库都有同名/相似表时由用户选择（genDsId），否则用应用默认
+  const [genDsId, setGenDsId] = useState('');
+  const [genCandidates, setGenCandidates] = useState<any[]>([]);
+  // 生成中的独立加载态（切菜单不丢失）+ 取消能力
+  const [genLoading, setGenLoading] = useState(false);
+  const [genCancelled, setGenCancelled] = useState(false);
+  const [genStopped, setGenStopped] = useState(false);
+  const [genStage, setGenStage] = useState('');
+  const genAbortRef = useRef<AbortController | null>(null);
+  const genTaskRef = useRef<string>('');
+  const genStageTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startGenStages = () => {
+    const stages = ['正在读取各数据库表结构…', '正在生成 SQL…', '正在校验表名与字段…'];
+    let i = 0;
+    setGenStage(stages[0]);
+    genStageTimer.current = setInterval(() => { i = (i + 1) % stages.length; setGenStage(stages[i]); }, 1400);
+  };
+  const stopGenStages = () => {
+    if (genStageTimer.current) { clearInterval(genStageTimer.current); genStageTimer.current = null; }
+  };
+
   const dsId = settings?.defaultDs ?? '';
+  const effDsId = genDsId || dsId;
   const nodeOf = (id: string | null) => tagTree.find((n) => n.id === id);
   const inBin = (r: ReportItem) => nodeOf(r.tag_node_id)?.kind_uniq === 'RECYCLE_BIN' || r.client_state === 'RECYCLED';
   const normalReports = reports.filter((r) => !inBin(r));
   const binReports = reports.filter((r) => inBin(r));
 
   async function gen() {
-    setErr(''); setBusy(true); setMsg('');
+    setErr(''); setMsg('');
+    setGenLoading(true); setGenCancelled(false); setGenStopped(false);
+    setGenCandidates([]); setGenDsId(''); setSql(''); setUnderstanding('');
+    startGenStages();
+    const ctrl = new AbortController();
+    genAbortRef.current = ctrl;
+    // 任务 id：后端据此定位并中断本次模型调用（「停止生成」用）
+    const taskId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    genTaskRef.current = taskId;
     try {
       const r = await fetch(`${api}/reports/generate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, dataSourceId: dsId, providerId: providerId || undefined }),
+        body: JSON.stringify({
+          prompt,
+          // 跨本应用所有已连接的库生成；后端会标明每个表属于哪个库
+          dataSourceIds: dsList.map((d) => d.id),
+          providerId: providerId || undefined,
+          taskId,
+        }),
+        signal: ctrl.signal,
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.message || '生成失败');
+      setGenCancelled(false); setGenStopped(false);
       setGenMode(d.mode); setSql(d.sql ?? ''); setUnderstanding(d.understanding ?? (d.reason ? '降级手工模式：' + d.reason : ''));
+      // 每个库各生成一条 SQL → 让用户选用哪个库的；单库则直接定
+      setGenCandidates(d.results ?? []);
+      setGenDsId(d.results?.[0]?.dataSourceId ?? d.dataSourceId ?? '');
       // 甲方未配置任何模型：直接把需求描述提交给开发者，由开发者据此生成 SQL 报表
       if (d.mode === 'manual' && d.noModel) {
         await submitRequirement(prompt);
@@ -162,7 +203,42 @@ export default function ClientPage() {
         return;
       }
       if (d.mode === 'manual') setErr('LLM 生成失败：' + (d.reason || '请检查模型配置或网络，也可点「求助开发者」'));
-    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+    } catch (e: any) {
+      if (e.name === 'AbortError') { setGenCancelled(true); return; }
+      setErr(e.message);
+    } finally {
+      stopGenStages();
+      setGenLoading(false);
+      genAbortRef.current = null;
+    }
+  }
+
+  // 取消正在进行的生成（AbortController 中断 fetch，前端立即停止等待）
+  function cancelGen() {
+    if (genStageTimer.current) stopGenStages();
+    genAbortRef.current?.abort();
+    setGenCancelled(true);
+    setGenLoading(false);
+    genAbortRef.current = null;
+  }
+
+  // 停止生成：调后端取消端点真正中断模型调用（省算力），同时停止本页等待
+  async function stopGen() {
+    const taskId = genTaskRef.current;
+    stopGenStages();
+    try {
+      if (taskId) {
+        await fetch(`${api}/reports/generate/cancel`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId }),
+        });
+      }
+    } catch { /* 取消请求失败不影响前端停止 */ }
+    genAbortRef.current?.abort();
+    genAbortRef.current = null;
+    genTaskRef.current = '';
+    setGenStopped(true);
+    setGenLoading(false);
   }
 
   // 把需求描述直接提交给开发者（无模型时的主路径；也供「求助开发者」复用）
@@ -181,7 +257,7 @@ export default function ClientPage() {
     try {
       const r = await fetch(`${api}/reports/preview`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql, dataSourceId: dsId, params: {} }),
+        body: JSON.stringify({ sql, dataSourceId: effDsId, params: {} }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.message || '预览失败');
@@ -194,7 +270,7 @@ export default function ClientPage() {
     try {
       const r = await fetch(`${api}/exports`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql, dataSourceId: dsId, params: {}, format: fmt }),
+        body: JSON.stringify({ sql, dataSourceId: effDsId, params: {}, format: fmt }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.message || '导出失败');
@@ -234,7 +310,7 @@ export default function ClientPage() {
     if (!reportName) { setErr('请填写报表名称'); return; }
     const r = await fetch(`${api}/reports`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: reportName, sqlText: sql, dataSourceId: dsId }),
+      body: JSON.stringify({ name: reportName, sqlText: sql, dataSourceId: effDsId }),
     });
     const d = await r.json();
     if (!r.ok) { setErr(d.message); return; }
@@ -418,7 +494,7 @@ export default function ClientPage() {
                     <option value="">默认模型</option>
                     {providers.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.model}</option>)}
                   </select>
-                  <button onClick={gen} disabled={busy || !dsId}>生成 SQL</button>
+                  <button onClick={gen} disabled={genLoading || !dsId}>生成 SQL</button>
                   {!dsId && (
                     <span className="err">
                       当前应用（/{appPath}）还没有可用数据源：请开发者进入「开发者端 → 数据源」新建，并点「设为默认」
@@ -432,7 +508,56 @@ export default function ClientPage() {
                 )}
               </div>
 
-              {sql && (
+              {genLoading && (
+                <div className="card gen-loading">
+                  <div className="gen-status">
+                    <span className="gen-spinner" />
+                    <strong>正在生成 SQL</strong>
+                  </div>
+                  <div className="gen-progress" />
+                  <div className="gen-stage">{genStage}</div>
+                  <div className="row">
+                    <button className="danger" onClick={stopGen}>停止生成</button>
+                    <button className="ghost" onClick={cancelGen}>仅取消等待</button>
+                  </div>
+                  <div className="muted" style={{ fontSize: 12 }}>
+                    「停止生成」会中断后端模型调用（不再消耗算力）；「仅取消等待」只停止本页等待，模型仍会在服务端跑完。
+                    生成期间可切到左侧其他菜单，回来后若已完成会直接显示结果。
+                  </div>
+                </div>
+              )}
+
+              {genStopped && !genLoading && (
+                <div className="card row" style={{ justifyContent: 'space-between' }}>
+                  <span className="muted">已停止生成，模型调用已中断（不再消耗算力）。可重新生成。</span>
+                  <button onClick={gen}>重新生成</button>
+                </div>
+              )}
+
+              {genCancelled && !genLoading && !genStopped && (
+                <div className="card row" style={{ justifyContent: 'space-between' }}>
+                  <span className="muted">已停止本页等待（模型仍在服务端跑完）。可重新生成，或直接在下方手动编写 SQL。</span>
+                  <button onClick={gen}>重新生成</button>
+                </div>
+              )}
+
+              {!genLoading && !genCancelled && !genStopped && genCandidates.length > 1 && (
+                <div className="card">
+                  <div className="row"><strong>多个数据库都能满足这个需求</strong><span className="pill">请选择用哪个库的 SQL</span></div>
+                  <div className="row" style={{ marginTop: 8 }}>
+                    {genCandidates.map((c) => (
+                      <button key={c.dataSourceId} className={genDsId === c.dataSourceId ? '' : 'ghost'} onClick={() => { setGenDsId(c.dataSourceId); setSql(c.sql); }}>
+                        {c.name} · {c.databaseName} <span className="muted">（{c.tables.join(', ')}）</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+                    不同库的表名/字段不同，生成的 SQL 也不同。选好后点「预览」确认数据，再保存。
+                  </div>
+                </div>
+              )}
+
+              {!genLoading && !genCancelled && !genStopped && sql && (
                 <div className="card">
                   <div className="row"><strong>② 生成的 SQL</strong>{genMode && <span className="pill">{genMode === 'llm' ? 'LLM' : '手工'}</span>}</div>
                   <div className="code">{sql}</div>

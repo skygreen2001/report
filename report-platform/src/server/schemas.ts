@@ -5,9 +5,18 @@ export const GenerateSchema = z.object({
   prompt: z.string().min(1).max(2000),
   // 不传则回落到该应用第一个可用数据源
   dataSourceId: z.string().nullish(),
+  // 多个数据源：让模型跨所有已连接的库生成；都不传则用该应用全部 ACTIVE 数据源
+  dataSourceIds: z.array(z.string()).nullish(),
   currentSql: z.string().nullish(),
   // 指定用哪个模型；不传用该应用默认模型
   providerId: z.string().nullish(),
+  // 前端生成的任务 id：用于「停止生成」端点定位并中断这次模型调用
+  taskId: z.string().nullish(),
+});
+
+// 停止生成：中断该任务的模型调用（省算力）
+export const StopGenerateSchema = z.object({
+  taskId: z.string().min(1).max(128),
 });
 
 // sql 与 reportId 二选一：给了 reportId 就用报表当前 SQL（REQ-GEN-04）

@@ -17,9 +17,14 @@ export async function POST(req: Request) {
     if (!dataSourceId) throw new HttpError(400, 'NO_DATA_SOURCE');
     const result = await generateSql(ctx, {
       prompt: body.prompt,
-      dataSourceId,
+      dataSourceId: dataSourceId,
+      dataSourceIds: body.dataSourceIds ?? undefined,
       currentSql: body.currentSql ?? undefined,
       providerId: body.providerId ?? undefined,
+    }, {
+      // taskId 供「停止生成」端点中断本次模型调用；客户端断开时也自动中断
+      taskId: body.taskId ?? undefined,
+      requestSignal: req.signal,
     });
     return json(result);
   });
