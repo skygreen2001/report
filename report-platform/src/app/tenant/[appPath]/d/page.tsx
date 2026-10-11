@@ -482,11 +482,11 @@ export default function DevPage() {
           <h4>导航</h4>
           <div className={'node' + (tab === 'ds' ? ' on' : '')} onClick={() => setTab('ds')}>数据源</div>
           <div className={'node' + (tab === 'doc' ? ' on' : '')} onClick={() => setTab('doc')}>数据库结构文档</div>
+          <div className={'node' + (tab === 'req' ? ' on' : '')} onClick={() => setTab('req')}>需求收件箱</div>
           <div className={'node' + (tab === 'reports' ? ' on' : '')} onClick={() => setTab('reports')}>报表（{normalReports.length}）</div>
-          <div className={'node' + (tab === 'bin' ? ' on' : '')} onClick={() => setTab('bin')}>回收站（{binReports.length}）</div>
           <div className={'node' + (tab === 'llm' ? ' on' : '')} onClick={() => setTab('llm')}>模型配置</div>
           {boot.app.isPlatformRoot && <div className={'node' + (tab === 'apps' ? ' on' : '')} onClick={() => setTab('apps')}>应用管理</div>}
-          <div className={'node' + (tab === 'req' ? ' on' : '')} onClick={() => setTab('req')}>需求收件箱</div>
+          <div className={'node' + (tab === 'bin' ? ' on' : '')} onClick={() => setTab('bin')}>回收站（{binReports.length}）</div>
         </div>
         <div className="content">
           {err && <div className="card err">⚠ {err}</div>}

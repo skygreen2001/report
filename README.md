@@ -172,6 +172,37 @@ npm run build && npm start   # 生产
 
 ---
 
+## 本地大模型配置（推荐）
+
+平台支持本地部署大模型来生成 SQL，数据不出本机、无需购买云端 API。
+
+### 推荐配置
+
+- **内存 ≥ 16G**
+
+### 安装步骤
+
+1. 安装 [Ollama](https://ollama.com)（macOS / Linux / Windows 均支持）。
+2. 拉取推荐模型：
+
+   ```bash
+   ollama pull qwen2.5-coder:7b-instruct-q4_K_M
+   ollama qwen2.5-coder:7b-instruct-q4_K_M
+   ```
+
+3. 启动 Ollama（安装后默认随系统启动，或执行 `ollama serve`）。
+4. 在企业报表平台（report-platform）的「模型配置」功能菜单中，新增模型并选中预设：**本地 Ollama**，保存即可。
+
+### 推荐理由
+
+| 模型 | 占用内存 | 说明 |
+| --- | --- | --- |
+| **Qwen2.5‑Coder‑7B‑Instruct** ⭐首选 | ~4.7G | 中文代码能力强，适合写业务 SQL、Debug、重构、生成单元测试；64K 上下文；16G 内存下运行非常流畅 |
+
+> 提示：q4_K_M 为 4-bit 量化版本，显存 / 内存占用低、推理速度快，是 16G 机型上「流畅 + 质量兼顾」的最佳平衡点。
+
+---
+
 ## 常用命令
 
 | 命令 | 说明 |
