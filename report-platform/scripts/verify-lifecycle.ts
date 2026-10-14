@@ -7,6 +7,7 @@ import { defaultSettings } from '@/server/context';
 import { encrypt } from '@/server/crypto';
 import { createApplication, disableApplication } from '@/server/services/application';
 import { createNode, renameNode, getRoot, getRecycleBin, listNodes } from '@/server/services/tagTree';
+import { getDefaultWorkspace } from '@/server/services/devWorkspace';
 import { saveReport, listReports } from '@/server/services/report';
 import { deleteReport, restoreReport, purge, restoreClientVisibility } from '@/server/services/lifecycle';
 import { createRequirement, listInbox, listMine, completeRequirement, confirmRequirement } from '@/server/services/requirement';
@@ -41,35 +42,37 @@ async function main() {
   const suffix = Date.now().toString(36);
   const appId = await createApplication({ name: `生命周期验证-${suffix}`, pathPrefix: `verify-${suffix}` });
   const app = (await pGet<any>('SELECT * FROM application WHERE id=?', [appId]))!;
+  // 开发者工作区：隔离粒度是「应用 + 人」，验证脚本统一用甲方的 OWNER 工作区
+  const ws = await getDefaultWorkspace(appId);
   // 自己的只读数据源（报表只能绑本应用的数据源，不能借用别的应用的）
   const dsId = `ds-${suffix}`;
   await pRun(
-    `INSERT INTO data_source (id,app_id,name,host,port,database_name,username,password_enc,status)
-     VALUES (?,?,?,?,?,?,?,?,'ACTIVE')`,
-    [dsId, appId, '只读库', '127.0.0.1', 3306, 'biz_demo', 'report_ro', encrypt('ReportRo@2026')],
+    `INSERT INTO data_source (id,app_id,ws_id,name,host,port,database_name,username,password_enc,status)
+     VALUES (?,?,?,?,?,?,?,?,?,'ACTIVE')`,
+    [dsId, appId, ws.id, '只读库', '127.0.0.1', 3306, 'biz_demo', 'report_ro', encrypt('ReportRo@2026')],
   );
   const ds = (await pGet<any>('SELECT * FROM data_source WHERE id=?', [dsId]))!;
 
-  const base = { appId, settings: defaultSettings(), app } as const;
+  const base = { appId, settings: defaultSettings(), app, wsId: ws.id } as const;
   const dev: RoleContext = { ...base, role: 'DEVELOPER', clientKey: 'dev-1' };
   const cli: RoleContext = { ...base, role: 'CLIENT', clientKey: 'cli-1' };
 
   console.log('=== M3 标签树（REQ-TAG-01/03/07）===');
-  const devRoot = (await getRoot(appId, 'DEVELOPER'))!;
-  const cliRoot = (await getRoot(appId, 'CLIENT'))!;
-  const devBin = (await getRecycleBin(appId, 'DEVELOPER'))!;
+  const devRoot = (await getRoot(appId, 'DEVELOPER', ws.id))!;
+  const cliRoot = (await getRoot(appId, 'CLIENT', null))!;
+  const devBin = (await getRecycleBin(appId, 'DEVELOPER', ws.id))!;
   ok(!!devRoot && !!cliRoot && !!devBin, '初始化出两棵树 + 回收站');
-  ok((await listNodes(appId, 'CLIENT')).length === 2, 'CLIENT 树初始 2 个系统节点');
+  ok((await listNodes(appId, 'CLIENT', null)).length === 2, 'CLIENT 树初始 2 个系统节点');
 
   // 深度限制：ROOT(1) → d1(2) → d2(3) → d3(4) → d4(5)，第 6 层应拒
   let p = devRoot.id;
   const dirs: string[] = [];
-  for (let i = 0; i < 4; i++) { p = await createNode(appId, 'DEVELOPER', `目录${i + 1}`, p); dirs.push(p); }
+  for (let i = 0; i < 4; i++) { p = await createNode(appId, 'DEVELOPER', ws.id, `目录${i + 1}`, p); dirs.push(p); }
   ok(dirs.length === 4, '连续建 4 层子目录成功');
-  await expectCode(() => createNode(appId, 'DEVELOPER', '超深目录', dirs[3]), 'MAX_DEPTH_EXCEEDED', '第 6 层目录被拒（MAX_DEPTH=5）');
-  await expectCode(() => createNode(appId, 'DEVELOPER', '回收站下', devBin.id), 'CANNOT_ADD_UNDER_BIN', '回收站下建目录被拒');
-  await expectCode(() => renameNode(appId, 'DEVELOPER', devRoot.id, '改名'), 'SYSTEM_NODE_IMMUTABLE', '重命名系统节点被拒');
-  await renameNode(appId, 'DEVELOPER', dirs[0], '目录一改名');
+  await expectCode(() => createNode(appId, 'DEVELOPER', ws.id, '超深目录', dirs[3]), 'MAX_DEPTH_EXCEEDED', '第 6 层目录被拒（MAX_DEPTH=5）');
+  await expectCode(() => createNode(appId, 'DEVELOPER', ws.id, '回收站下', devBin.id), 'CANNOT_ADD_UNDER_BIN', '回收站下建目录被拒');
+  await expectCode(() => renameNode(appId, 'DEVELOPER', ws.id, devRoot.id, '改名'), 'SYSTEM_NODE_IMMUTABLE', '重命名系统节点被拒');
+  await renameNode(appId, 'DEVELOPER', ws.id, dirs[0], '目录一改名');
   ok((await pGet<any>('SELECT name FROM tag_node WHERE id=?', [dirs[0]]))!.name === '目录一改名', '普通目录可重命名');
 
   console.log('\n=== M3 双轨生命周期（REQ-SAVE-02 / REQ-LIFE-02/04/06/07/16）===');
@@ -109,7 +112,7 @@ async function main() {
   let r = (await pGet<any>('SELECT * FROM report WHERE id=?', [reportId]))!;
   ok(r.client_state === 'RECYCLED' && r.developer_state === 'NORMAL', '甲方删除：client=RECYCLED，developer=NORMAL（双轨独立）');
   ok((await pQuery('SELECT 1 FROM report_placement WHERE report_id=? AND role=? AND tag_node_id=?', [reportId, 'CLIENT', cliRoot.id])).length === 0, '甲方侧已移出原目录');
-  const cliBin0 = (await getRecycleBin(appId, 'CLIENT'))!;
+  const cliBin0 = (await getRecycleBin(appId, 'CLIENT', null))!;
   const cliPlBin = (await pGet<any>('SELECT * FROM report_placement WHERE report_id=? AND role=?', [reportId, 'CLIENT']))!;
   ok(cliPlBin.tag_node_id === cliBin0.id, '甲方侧落入甲方回收站节点（回收站内容必须可列出）');
   ok((await listReports(dev)).some((x: any) => x.id === reportId), '开发者列表仍可见该报表');
@@ -132,7 +135,7 @@ async function main() {
   // 开发者恢复甲方可见 → 落入甲方回收站（REQ-LIFE-16）
   await restoreClientVisibility(dev, reportId);
   r = (await pGet<any>('SELECT * FROM report WHERE id=?', [reportId]))!;
-  const cliBin = (await getRecycleBin(appId, 'CLIENT'))!;
+  const cliBin = (await getRecycleBin(appId, 'CLIENT', null))!;
   const cliPl3 = (await pGet<any>('SELECT * FROM report_placement WHERE report_id=? AND role=?', [reportId, 'CLIENT']))!;
   ok(r.client_state === 'RECYCLED', '恢复甲方可见：client_state=RECYCLED');
   ok(cliPl3.tag_node_id === cliBin.id, '落入甲方回收站');
@@ -175,7 +178,11 @@ async function main() {
 
   console.log('\n=== M6 应用管理（REQ-ACC-10/13）===');
   const rootApp = (await pGet<any>('SELECT * FROM application WHERE is_platform_root=1'))!;
-  const rootCtx: RoleContext = { appId: rootApp.id, role: 'DEVELOPER', clientKey: 'root', settings: defaultSettings(), app: rootApp };
+  const rootWs = await getDefaultWorkspace(rootApp.id);
+  const rootCtx: RoleContext = {
+    appId: rootApp.id, role: 'DEVELOPER', clientKey: 'root', settings: defaultSettings(), app: rootApp,
+    wsId: rootWs.id,
+  };
   await expectCode(() => disableApplication(dev, rootApp.id), 'NOT_PLATFORM_ROOT', '非平台根应用不能停用别的应用');
   await expectCode(() => disableApplication(rootCtx, rootApp.id), 'CANNOT_DISABLE_ROOT', '平台根应用自身不可停用');
   await disableApplication(rootCtx, appId);

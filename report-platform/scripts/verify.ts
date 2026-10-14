@@ -7,6 +7,7 @@ import { getDsPool } from '@/server/db/datasource';
 import { loadDataSource } from '@/server/services/datasource';
 import { execute } from '@/server/sql/gateway';
 import { defaultSettings } from '@/server/context';
+import { getDefaultWorkspace } from '@/server/services/devWorkspace';
 import { createExport } from '@/server/services/export';
 import type { RoleContext } from '@/lib/types';
 
@@ -24,7 +25,11 @@ async function main() {
   if (!app) throw new Error('未找到 demo 应用，请先运行 seed');
   const dsRow = await pGet<any>('SELECT * FROM data_source WHERE app_id=?', [app.id]);
   const ds = await loadDataSource(dsRow.id);
-  const ctx: RoleContext = { appId: app.id, role: 'CLIENT', clientKey: 'verify', settings: defaultSettings(), app };
+  const ws = await getDefaultWorkspace(app.id);
+  const ctx: RoleContext = {
+    appId: app.id, role: 'CLIENT', clientKey: 'verify', settings: defaultSettings(), app,
+    wsId: ws.id,
+  };
 
   console.log('=== ① 正常预览（GROUP BY 聚合，走 SQL 网关）===');
   const r1 = await execute(ds, 'SELECT region, COUNT(*) AS cnt, SUM(amount) AS total_amount FROM orders GROUP BY region ORDER BY total_amount DESC', {}, { maxRows: 200, timeoutMs: 15000, source: 'PREVIEW', ctx });

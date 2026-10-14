@@ -6,6 +6,7 @@ import { loadDataSource } from '@/server/services/datasource';
 import { generateSql } from '@/server/services/generation';
 import { execute } from '@/server/sql/gateway';
 import { defaultSettings } from '@/server/context';
+import { getDefaultWorkspace } from '@/server/services/devWorkspace';
 import type { RoleContext } from '@/lib/types';
 
 function loadEnv() {
@@ -22,7 +23,11 @@ async function main() {
   if (!app) throw new Error('未找到 demo 应用');
   const dsRow = await pGet<any>('SELECT * FROM data_source WHERE app_id=?', [app.id]);
   const ds = await loadDataSource(dsRow.id);
-  const ctx: RoleContext = { appId: app.id, role: 'DEVELOPER', clientKey: 'smoke', settings: defaultSettings(), app };
+  const ws = await getDefaultWorkspace(app.id);
+  const ctx: RoleContext = {
+    appId: app.id, role: 'DEVELOPER', clientKey: 'smoke', settings: defaultSettings(), app,
+    wsId: ws.id,
+  };
 
   console.log('=== M2 NL2SQL 在线生成（DeepSeek）===');
   const res = await generateSql(ctx, {

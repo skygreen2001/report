@@ -14,12 +14,18 @@ export async function loadDataSource(id: string): Promise<DataSourceRow> {
   return ds;
 }
 
-export async function listDataSources(appId: string): Promise<Omit<DataSourceRow, 'password_enc'>[]> {
-  const rows = await pQuery<DataSourceRow>(
-    'SELECT id,app_id,name,host,port,database_name,username,status,catalog_json,sensitive_columns_json,created_at,updated_at FROM data_source WHERE app_id=? ORDER BY created_at',
-    [appId],
+// 列表不含凭据（REQ-SEC）。按工作区隔离：开发者只看自己工作区的数据源；
+// 甲方是汇总方，看整个应用的（这些本就是甲方的业务库）。
+export async function listDataSources(ctx: RoleContext): Promise<Omit<DataSourceRow, 'password_enc'>[]> {
+  const cols = 'id,app_id,ws_id,name,host,port,database_name,username,status,catalog_json,sensitive_columns_json,created_at,updated_at';
+  if (ctx.role === 'DEVELOPER') {
+    return pQuery<DataSourceRow>(
+      `SELECT ${cols} FROM data_source WHERE app_id=? AND ws_id=? ORDER BY created_at`, [ctx.appId, ctx.wsId],
+    );
+  }
+  return pQuery<DataSourceRow>(
+    `SELECT ${cols} FROM data_source WHERE app_id=? ORDER BY created_at`, [ctx.appId],
   );
-  return rows;
 }
 
 export interface CreateDsInput {
@@ -33,20 +39,21 @@ export interface CreateDsInput {
 }
 
 export async function createDataSource(ctx: RoleContext, input: CreateDsInput): Promise<string> {
-  // 去重：同一应用内连接信息（host/port/库名/账号）完全相同视为重复，避免误建两份一模一样的数据源
+  // 去重：同一工作区内连接信息（host/port/库名/账号）完全相同视为重复。
+  // 注意按工作区判重而非按应用——两个开发者各自连甲方的同一个库是正常场景，不该互相拦。
   const dup = await pGet<{ id: string }>(
-    `SELECT id FROM data_source WHERE app_id=? AND host=? AND port=? AND database_name=? AND username=? LIMIT 1`,
-    [ctx.appId, input.host, input.port, input.database_name, input.username],
+    `SELECT id FROM data_source WHERE app_id=? AND ws_id=? AND host=? AND port=? AND database_name=? AND username=? LIMIT 1`,
+    [ctx.appId, ctx.wsId, input.host, input.port, input.database_name, input.username],
   );
   if (dup) {
     throw new HttpError(409, 'DATA_SOURCE_DUPLICATE', '该数据源已存在（host / 端口 / 库名 / 账号完全相同），请勿重复添加。');
   }
   const id = crypto.randomUUID();
   await pRun(
-    `INSERT INTO data_source (id,app_id,name,host,port,database_name,username,password_enc,status,sensitive_columns_json)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    `INSERT INTO data_source (id,app_id,ws_id,name,host,port,database_name,username,password_enc,status,sensitive_columns_json)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
     [
-      id, ctx.appId, input.name, input.host, input.port, input.database_name, input.username,
+      id, ctx.appId, ctx.wsId, input.name, input.host, input.port, input.database_name, input.username,
       encrypt(input.password), 'ACTIVE', input.sensitive_columns_json ?? null,
     ],
   );
@@ -66,9 +73,12 @@ async function writeDefaultDataSource(app: ApplicationRow, dsId: string | null):
   invalidateAppCache(app.host, app.path_prefix);
 }
 
-// 设为默认数据源（仅 DEVELOPER）
+// 设为默认数据源（仅 DEVELOPER）。只能把自己工作区里的数据源设为默认，
+// 否则等于把甲方/别的开发者的默认库改掉。
 export async function setDefaultDataSource(ctx: RoleContext, id: string): Promise<void> {
-  const ds = await pGet<DataSourceRow>('SELECT id FROM data_source WHERE id=? AND app_id=?', [id, ctx.appId]);
+  const ds = await pGet<DataSourceRow>(
+    'SELECT id FROM data_source WHERE id=? AND app_id=? AND ws_id=?', [id, ctx.appId, ctx.wsId],
+  );
   if (!ds) throw new HttpError(404, 'DATA_SOURCE_NOT_FOUND');
   const app = await pGet<ApplicationRow>('SELECT * FROM application WHERE id=?', [ctx.appId]);
   if (!app) throw new HttpError(404, 'APP_NOT_FOUND');
@@ -88,8 +98,10 @@ export interface DeleteDsResult {
 }
 export async function deleteDataSource(ctx: RoleContext, id: string, targetDsId?: string): Promise<DeleteDsResult> {
   if (ctx.role !== 'DEVELOPER') throw new HttpError(403, 'FORBIDDEN');
-  // 跨应用归属校验：别的开发者删不到你应用的数据源
-  const ds = await pGet<DataSourceRow>('SELECT * FROM data_source WHERE id=? AND app_id=?', [id, ctx.appId]);
+  // 跨应用 + 跨工作区归属校验：别的开发者删不到你工作区的数据源
+  const ds = await pGet<DataSourceRow>(
+    'SELECT * FROM data_source WHERE id=? AND app_id=? AND ws_id=?', [id, ctx.appId, ctx.wsId],
+  );
   if (!ds) throw new HttpError(404, 'DATA_SOURCE_NOT_FOUND');
 
   // 依赖检查：报表 / 运行记录 是否还指着这个数据源（sql_version 不绑定数据源，无需检查）
@@ -109,10 +121,10 @@ export async function deleteDataSource(ctx: RoleContext, id: string, targetDsId?
         `该数据源仍被 ${used} 条记录引用（报表 / 运行记录），无法直接删除。可把它关联的报表改派到其他同源数据源，或使用「改派并删除」。`,
       );
     }
-    // 校验目标源：必须是同应用、存在、非自身、ACTIVE
+    // 校验目标源：必须是本工作区内、存在、非自身、ACTIVE（不能把数据改派到别人的工作区去）
     if (targetDsId === id) throw new HttpError(400, 'BAD_TARGET', '改派目标不能是被删除的数据源本身');
     const target = await pGet<DataSourceRow>(
-      'SELECT * FROM data_source WHERE id=? AND app_id=? AND status=?', [targetDsId, ctx.appId, 'ACTIVE'],
+      'SELECT * FROM data_source WHERE id=? AND app_id=? AND ws_id=? AND status=?', [targetDsId, ctx.appId, ctx.wsId, 'ACTIVE'],
     );
     if (!target) throw new HttpError(404, 'TARGET_NOT_FOUND', '改派目标数据源不存在或不可用');
     // 同事务改派（报表 + 运行记录）→ 后续删除原子完成，不会留悬空外键
@@ -130,8 +142,8 @@ export async function deleteDataSource(ctx: RoleContext, id: string, targetDsId?
   const app = await pGet<ApplicationRow>('SELECT * FROM application WHERE id=?', [ctx.appId]);
   if (app && parseSettings(app.settings_json).defaultDs === id) {
     const fallback = await pGet<{ id: string }>(
-      `SELECT id FROM data_source WHERE app_id=? AND id<>? AND status='ACTIVE' ORDER BY created_at LIMIT 1`,
-      [ctx.appId, id],
+      `SELECT id FROM data_source WHERE app_id=? AND ws_id=? AND id<>? AND status='ACTIVE' ORDER BY created_at LIMIT 1`,
+      [ctx.appId, ctx.wsId, id],
     );
     newDefaultDs = fallback?.id ?? null;
     await writeDefaultDataSource(app, newDefaultDs);
@@ -150,17 +162,20 @@ export async function deleteDataSource(ctx: RoleContext, id: string, targetDsId?
 // 解析「实际可用」的默认数据源：settings.defaultDs 为空/已失效时，回落到该应用第一个 ACTIVE 数据源。
 // 这样即使开发者只建了数据源却没显式点「设为默认」，甲方侧也不会被卡住。
 export async function resolveDefaultDataSourceId(ctx: RoleContext): Promise<string | null> {
+  // 开发者只认自己工作区里的默认源；甲方（汇总方）可在整个应用范围内回落
+  const inScope = ctx.role === 'DEVELOPER' ? ' AND ws_id=?' : '';
+  const base: unknown[] = ctx.role === 'DEVELOPER' ? [ctx.appId, ctx.wsId] : [ctx.appId];
   const want = ctx.settings.defaultDs;
   if (want) {
     const row = await pGet<{ id: string }>(
-      `SELECT id FROM data_source WHERE id=? AND app_id=? AND status='ACTIVE'`,
-      [want, ctx.appId],
+      `SELECT id FROM data_source WHERE id=? AND app_id=?${inScope} AND status='ACTIVE'`,
+      ctx.role === 'DEVELOPER' ? [want, ctx.appId, ctx.wsId] : [want, ctx.appId],
     );
     if (row) return row.id;
   }
   const rows = await pQuery<{ id: string }>(
-    `SELECT id FROM data_source WHERE app_id=? AND status='ACTIVE' ORDER BY created_at LIMIT 1`,
-    [ctx.appId],
+    `SELECT id FROM data_source WHERE app_id=?${inScope} AND status='ACTIVE' ORDER BY created_at LIMIT 1`,
+    base,
   );
   return rows[0]?.id ?? null;
 }

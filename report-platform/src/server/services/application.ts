@@ -1,6 +1,7 @@
 // 应用服务（doc §5、§17.1）。平台根应用创建/停用；普通应用创建后初始化两棵树（REQ-ACC-10/11/13）。
 import { pGet, pQuery, pRun } from '../db/platform';
-import { initTrees } from './tagTree';
+import { initClientTree } from './tagTree';
+import { ensureDefaultWorkspace } from './devWorkspace';
 import { HttpError } from '../errors';
 import type { ApplicationRow, AppSettings, RoleContext } from '@/lib/types';
 import crypto from 'node:crypto';
@@ -31,7 +32,9 @@ export async function createApplication(input: CreateAppInput): Promise<string> 
      VALUES (?,?,?,?,?,?,?)`,
     [id, input.name, input.host ?? '', input.pathPrefix, 'ACTIVE', 0, JSON.stringify(settings)],
   );
-  await initTrees(id); // 初始化两棵标签树（REQ-ACC-11）
+  // 甲方汇总视图一棵树（REQ-ACC-11）；再建一个默认工作区（主开发者空间，原单开发者体验）。
+  await initClientTree(id);
+  await ensureDefaultWorkspace(id);
   return id;
 }
 
@@ -78,6 +81,7 @@ export async function ensurePlatformRoot(): Promise<string> {
      VALUES (?,?,?,?,?,?,?)`,
     [id, '平台根', '', 'platform', 'ACTIVE', 1, JSON.stringify(settings)],
   );
-  await initTrees(id);
+  await initClientTree(id);
+  await ensureDefaultWorkspace(id);
   return id;
 }

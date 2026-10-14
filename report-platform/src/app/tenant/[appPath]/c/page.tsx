@@ -5,7 +5,7 @@ import { LLM_PRESETS, presetOf, vendorLabel, initialProviderForm } from '@/lib/l
 import SchemaDoc, { type DsLite } from '@/components/SchemaDoc';
 
 interface Settings { clientCanViewSql: boolean; defaultDs: string | null; maxRows: number; [k: string]: any; }
-interface ReportItem { id: string; name: string; tag_node_id: string | null; client_state: string; created_at: string; }
+interface ReportItem { id: string; name: string; tag_node_id: string | null; client_state: string; created_at: string; ws_name?: string | null; }
 interface ParamDef { name: string; label: string; }
 
 function parseSchema(json?: string | null): ParamDef[] {
@@ -388,6 +388,7 @@ export default function ClientPage() {
       <div className="row" key={r.id} style={{ justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
         <div style={{ cursor: 'pointer', minWidth: 220 }} onClick={() => openReport(r.id)}>
           <strong>{r.name}</strong>{selId === r.id && <span className="pill">当前</span>}
+          {r.ws_name && <span className="badge" style={{ marginLeft: 6 }} title="这份报表来自哪个开发者的工作区">来自：{r.ws_name}</span>}
           <div className="muted" style={{ fontSize: 12 }}>
             {nodeOf(r.tag_node_id)?.name ?? '根目录'} · {new Date(r.created_at).toLocaleString('zh-CN')}
           </div>

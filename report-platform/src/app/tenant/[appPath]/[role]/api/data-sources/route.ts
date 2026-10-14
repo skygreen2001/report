@@ -10,7 +10,7 @@ import { HttpError } from '@/server/errors';
 export async function GET(req: Request) {
   return withRole(req, async (ctx) => {
     if (ctx.role !== 'DEVELOPER') throw new HttpError(403, 'FORBIDDEN');
-    return json({ dataSources: await listDataSources(ctx.appId) });
+    return json({ dataSources: await listDataSources(ctx) });
   });
 }
 

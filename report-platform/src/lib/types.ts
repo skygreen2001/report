@@ -23,9 +23,27 @@ export interface ApplicationRow {
   settings_json: string | null;
 }
 
+// 开发者工作区：每个使用者（= 一个浏览器身份）一套隔离配置，人人平等，没有特殊甲方。
+// 身份 = 中间件首次访问时生成并写入浏览器的随机串（ws_key），也可用 ?ws=<key> 链接搬到别的设备。
+// /d 只看自己身份下的配置；/c 汇总所有身份产出的报表。
+export type WorkspaceKind = 'OWNER' | 'DEVELOPER';
+export interface DevWorkspaceRow {
+  id: string;
+  app_id: string;
+  ws_key: string;
+  name: string;
+  kind: WorkspaceKind;
+  status: 'ACTIVE' | 'DISABLED';
+  // 0 = 尚未归属任何浏览器（存量/新建应用时的候选）；首次被访问即认领为 1 并绑定 ws_key
+  claimed: 0 | 1;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DataSourceRow {
   id: string;
   app_id: string;
+  ws_id: string | null;
   name: string;
   host: string;
   port: number;
@@ -42,6 +60,7 @@ export interface DataSourceRow {
 export interface ReportRow {
   id: string;
   app_id: string;
+  ws_id: string | null;
   name: string;
   sql_text: string;
   data_source_id: string | null;
@@ -61,6 +80,7 @@ export interface ReportRow {
 export interface LlmProviderRow {
   id: string;
   app_id: string;
+  ws_id: string | null;
   scope: 'DEVELOPER' | 'CLIENT';
   name: string;
   vendor: string;
@@ -94,6 +114,9 @@ export interface RoleContext {
   clientKey: string;
   settings: AppSettings;
   app: ApplicationRow;
+  // 当前「人」的工作区：开发者配置按人隔离的关键维度。
+  // 不带 ws 参数 → 应用默认工作区（主开发者空间）；带 ws=<key> → 该使用者自己的私密空间。
+  wsId: string;
 }
 
 export type RunSource = 'PREVIEW' | 'EXPORT' | 'SAVE' | 'DEV_DEBUG';

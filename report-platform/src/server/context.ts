@@ -1,5 +1,6 @@
 // RoleContext 解析（doc §2.3）。每次请求重算，绝不信任前端传入角色。
 import { pGet } from './db/platform';
+import { resolveWorkspace } from './services/devWorkspace';
 import { cacheGet, cacheSet, cacheDeleteBySuffix } from './cache';
 import { HttpError } from './errors';
 import type { ApplicationRow, AppSettings, Role, RoleContext } from '@/lib/types';
@@ -61,6 +62,22 @@ export function readClientKey(req: Request): string {
   return 'anonymous';
 }
 
+// 身份串是否由中间件现场生成（= 这个浏览器第一次来）。只有这种情况才允许认领存量工作区。
+export function readWsGenerated(req: Request): boolean {
+  return req.headers.get('x-ws-generated') === '1';
+}
+
+// 开发者工作区标识：优先本次请求（URL ?ws= 由中间件写入头），其次 Cookie（后续 API 请求带上）。
+export function readWsKey(req: Request, url: URL): string | null {
+  const h = req.headers.get('x-ws');
+  if (h) return h.trim() || null;
+  const q = url.searchParams.get('ws');
+  if (q) return q.trim() || null;
+  const cookie = req.headers.get('cookie') ?? '';
+  const m = cookie.match(/(?:^|;\s*)wsKey=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
 // 解析请求 → RoleContext。host + path 推导应用与角色（doc §2.3、REQ-ACC-03/04/05）。
 export async function resolveContext(req: Request): Promise<RoleContext> {
   const url = new URL(req.url);
@@ -82,12 +99,19 @@ export async function resolveContext(req: Request): Promise<RoleContext> {
     throw new HttpError(404, 'APP_NOT_FOUND');
   }
 
+  // 工作区：开发者配置按「人」隔离的关键维度。
+  //   /d 或 /c 不带 ws → 应用默认工作区（主开发者空间）；带 ws=<key> → 该使用者自己的私密空间。
+  //   因此 A 开发者在 /d 看不到 B 开发者的配置；而 /c 侧汇总所有工作区产出的报表。
+  const wsKey = readWsKey(req, url);
+  const ws = await resolveWorkspace(app.id, wsKey, readWsGenerated(req));
+
   return {
     appId: app.id,
     role: (roleSeg === 'd' ? 'DEVELOPER' : 'CLIENT') as Role,
     clientKey: readClientKey(req),
     settings: parseSettings(app.settings_json),
     app,
+    wsId: ws.id,
   };
 }
 

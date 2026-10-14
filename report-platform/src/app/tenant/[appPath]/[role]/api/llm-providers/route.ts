@@ -9,7 +9,7 @@ import { HttpError } from '@/server/errors';
 // GET /llm-providers —— 模型列表。按角色作用域隔离：开发者看自己的全量（含 endpoint/hasKey），甲方只看自己的可选模型名。
 export async function GET(req: Request) {
   return withRole(req, async (ctx) => {
-    const rows = await listProviders(ctx.appId, ctx.role);
+    const rows = await listProviders(ctx);
     if (ctx.role === 'CLIENT') {
       return json({ providers: rows.map((r) => ({ id: r.id, name: r.name, model: r.model, vendor: r.vendor, is_default: r.is_default, status: r.status })) });
     }

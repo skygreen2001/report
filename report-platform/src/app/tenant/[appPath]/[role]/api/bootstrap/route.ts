@@ -12,9 +12,9 @@ export async function GET(req: Request) {
   return withRole(req, async (ctx) => {
     const [reports, nodes, dsRows, providers] = await Promise.all([
       listReports(ctx),
-      listNodes(ctx.appId, ctx.role),
-      listDataSources(ctx.appId),
-      listProviders(ctx.appId, ctx.role),
+      listNodes(ctx.appId, ctx.role, ctx.role === 'DEVELOPER' ? ctx.wsId : null),
+      listDataSources(ctx),
+      listProviders(ctx),
     ]);
     // 甲方也要看「数据库结构文档」，但只给库名与显示名，不给 host/账号等连接信息
     const ds = ctx.role === 'CLIENT'
@@ -25,6 +25,8 @@ export async function GET(req: Request) {
     return json({
       app: { id: ctx.appId, name: ctx.app.name, isPlatformRoot: !!ctx.app.is_platform_root },
       role: ctx.role,
+      // 当前访问者所处的「开发者工作区」：甲方＝OWNER（自己的），外部开发者＝他自己的
+      workspace: { id: ctx.wsId },
       settings: { ...ctx.settings, defaultDs },
       reports,
       tagTree: nodes,

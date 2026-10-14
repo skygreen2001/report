@@ -25,10 +25,35 @@ CREATE TABLE IF NOT EXISTS application (
   UNIQUE KEY uk_platform_root ((CASE WHEN is_platform_root=1 THEN 1 ELSE NULL END))
 ) ENGINE=InnoDB;
 
+-- ---------- dev_workspace（开发者工作区：每个使用者一套隔离配置，人人平等）----------
+-- 设计要点：
+--   · 身份由浏览器承载——中间件首次访问时生成随机 ws_key 写入 Cookie；也可用 /{appPath}/d?ws=<key>
+--     链接把身份搬到别的设备。身份只是随机串，不含任何敏感信息。
+--   · 配置（数据源 / 模型 / 目录）仍存在服务器，只按身份做归属隔离：
+--     每个人在 /d 只看到自己身份下的东西，别人看不见，需要自己配。
+--   · 报表共享：/c 甲方视图汇总「所有身份」产出的报表，人人可见且能正常运行
+--     （因为数据源凭据在服务器，不在浏览器——否则别人点开报表会连不上库）。
+--   · claimed=0 表示尚未归属任何浏览器（存量迁移 / 新建应用时的候选），首次被访问即认领。
+CREATE TABLE IF NOT EXISTS dev_workspace (
+  id          VARCHAR(36) NOT NULL,
+  app_id      VARCHAR(36) NOT NULL,
+  ws_key      VARCHAR(64) NOT NULL,          --  身份标识（不可猜），存于浏览器 Cookie 或 ?ws= 链接
+  name        VARCHAR(120) NOT NULL,         --  展示名，如「主开发者」「工作区」
+  kind        ENUM('OWNER','DEVELOPER') NOT NULL DEFAULT 'DEVELOPER',
+  status      ENUM('ACTIVE','DISABLED') NOT NULL DEFAULT 'ACTIVE',
+  claimed     TINYINT(1) NOT NULL DEFAULT 0, --  是否已被某个浏览器认领（0=待认领的存量/新应用候选）
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_app_key (app_id, ws_key),
+  KEY idx_app_kind (app_id, kind, status)
+) ENGINE=InnoDB;
+
 -- ---------- data_source ----------
 CREATE TABLE IF NOT EXISTS data_source (
   id                 VARCHAR(36) NOT NULL,
   app_id             VARCHAR(36) NOT NULL,
+  ws_id              VARCHAR(36) NULL,       --  归属工作区：开发者只看见自己工作区的数据源
   name               VARCHAR(120) NOT NULL,
   host               VARCHAR(255) NOT NULL,
   port               INT NOT NULL,
@@ -43,13 +68,15 @@ CREATE TABLE IF NOT EXISTS data_source (
   created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  KEY idx_app (app_id)
+  KEY idx_app (app_id),
+  KEY idx_app_ws (app_id, ws_id)
 ) ENGINE=InnoDB;
 
 -- ---------- report ----------
 CREATE TABLE IF NOT EXISTS report (
   id                     VARCHAR(36) NOT NULL,
   app_id                 VARCHAR(36) NOT NULL,
+  ws_id                  VARCHAR(36) NULL,       --  产出该报表的工作区（开发者只看自己的；甲方汇总全部）
   name                   VARCHAR(120) NOT NULL,
   sql_text               MEDIUMTEXT NOT NULL,
   data_source_id         VARCHAR(36),
@@ -69,7 +96,8 @@ CREATE TABLE IF NOT EXISTS report (
   UNIQUE KEY uk_app_name (app_id, name),
   KEY idx_client (app_id, client_state),
   KEY idx_developer (app_id, developer_state),
-  KEY idx_ds (data_source_id)
+  KEY idx_ds (data_source_id),
+  KEY idx_app_ws (app_id, ws_id)
 ) ENGINE=InnoDB;
 
 -- ---------- tag_node ----------
@@ -77,6 +105,7 @@ CREATE TABLE IF NOT EXISTS tag_node (
   id         VARCHAR(36) NOT NULL,
   app_id     VARCHAR(36) NOT NULL,
   role       ENUM('CLIENT','DEVELOPER') NOT NULL,
+  ws_id      VARCHAR(36) NULL,             --  开发者目录树按工作区隔离（甲方侧此列为 NULL，全应用一棵）
   kind       ENUM('ROOT','NORMAL','RECYCLE_BIN') NOT NULL DEFAULT 'NORMAL',
   parent_id  VARCHAR(36),
   name       VARCHAR(120),
@@ -85,9 +114,9 @@ CREATE TABLE IF NOT EXISTS tag_node (
   kind_uniq  ENUM('ROOT','RECYCLE_BIN') NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  -- MySQL 唯一索引允许重复 NULL → 模拟部分唯一索引（§4.2）
-  UNIQUE KEY uk_system_node (app_id, role, kind_uniq),
-  KEY idx_parent (app_id, role, parent_id)
+  -- MySQL 唯一索引允许重复 NULL → 模拟部分唯一索引（§4.2）；开发者侧按工作区各一棵树，故唯一键含 ws_id
+  UNIQUE KEY uk_system_node (app_id, role, kind_uniq, ws_id),
+  KEY idx_parent (app_id, role, ws_id, parent_id)
 ) ENGINE=InnoDB;
 
 -- ---------- report_placement（双轨：一份报表每角色一棵树一条）----------
@@ -199,7 +228,8 @@ CREATE TABLE IF NOT EXISTS export_task (
 CREATE TABLE IF NOT EXISTS llm_provider (
   id           VARCHAR(36)  NOT NULL,
   app_id       VARCHAR(36)  NOT NULL,
-  scope        ENUM('DEVELOPER','CLIENT') NOT NULL DEFAULT 'DEVELOPER', -- 归属角色：开发者 / 甲方各自一套，互不干扰
+  ws_id        VARCHAR(36)  NULL,          --  归属工作区：OWNER 工作区＝甲方的模型（/c 与 /d 共用），其余＝该开发者的模型
+  scope        ENUM('DEVELOPER','CLIENT') NOT NULL DEFAULT 'DEVELOPER', -- 冗余标记，便于兼容旧查询；实际隔离以 ws_id 为准
   name         VARCHAR(120) NOT NULL,          -- 展示名，如「DeepSeek-V3」
   vendor       VARCHAR(40)  NOT NULL DEFAULT 'custom',
   endpoint     VARCHAR(255) NOT NULL,          -- OpenAI 兼容 baseURL
@@ -210,5 +240,6 @@ CREATE TABLE IF NOT EXISTS llm_provider (
   created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  KEY idx_app (app_id)
+  KEY idx_app (app_id),
+  KEY idx_app_ws (app_id, ws_id)
 ) ENGINE=InnoDB;

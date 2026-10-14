@@ -16,14 +16,15 @@ export interface ProviderInput {
   isDefault?: boolean;
 }
 
-// 列表：绝不带 api_key_enc（REQ-SEC：凭据不回显）。按 scope（角色）隔离——开发者只看见开发者的，甲方只看见甲方的。
-export async function listProviders(appId: string, scope: 'DEVELOPER' | 'CLIENT', onlyActive = false): Promise<any[]> {
+// 列表：绝不带 api_key_enc（REQ-SEC：凭据不回显）。
+// 按「工作区 + 角色」隔离——每个使用者在自己工作区配的模型，只有他自己看得到（/d 看 DEVELOPER，/c 看 CLIENT）。
+export async function listProviders(ctx: RoleContext, onlyActive = false): Promise<any[]> {
   const rows = await pQuery<LlmProviderRow>(
-    `SELECT id,app_id,scope,name,vendor,endpoint,model,is_default,status,created_at,
+    `SELECT id,app_id,ws_id,scope,name,vendor,endpoint,model,is_default,status,created_at,
             (api_key_enc IS NOT NULL AND api_key_enc <> '') AS has_key
-     FROM llm_provider WHERE app_id=? AND scope=?${onlyActive ? " AND status='ACTIVE'" : ''}
+     FROM llm_provider WHERE app_id=? AND ws_id=? AND scope=?${onlyActive ? " AND status='ACTIVE'" : ''}
      ORDER BY is_default DESC, created_at`,
-    [appId, scope],
+    [ctx.appId, ctx.wsId, ctx.role],
   );
   return rows.map((r: any) => ({ ...r, has_key: !!Number(r.has_key) }));
 }
@@ -36,16 +37,16 @@ function normalizeEndpoint(raw: string): string {
 }
 
 export async function createProvider(ctx: RoleContext, input: ProviderInput): Promise<string> {
-  // 谁调谁拥有：开发者建的就是 DEVELOPER 作用域，甲方建的就是 CLIENT 作用域（各是各的配置）
+  // 谁调谁拥有：模型挂在当前工作区 + 当前角色下。/d 配的归 DEVELOPER，/c 配的归 CLIENT，各是各的。
   const scope = ctx.role;
   const id = crypto.randomUUID();
   const endpoint = normalizeEndpoint(input.endpoint);
   if (!endpoint) throw new HttpError(400, 'ENDPOINT_REQUIRED');
   if (!input.model?.trim()) throw new HttpError(400, 'MODEL_REQUIRED');
   await pRun(
-    `INSERT INTO llm_provider (id,app_id,scope,name,vendor,endpoint,model,api_key_enc,is_default,status)
-     VALUES (?,?,?,?,?,?,?,?,?, 'ACTIVE')`,
-    [id, ctx.appId, scope, input.name, input.vendor ?? 'custom', endpoint, input.model.trim(),
+    `INSERT INTO llm_provider (id,app_id,ws_id,scope,name,vendor,endpoint,model,api_key_enc,is_default,status)
+     VALUES (?,?,?,?,?,?,?,?,?,?, 'ACTIVE')`,
+    [id, ctx.appId, ctx.wsId, scope, input.name, input.vendor ?? 'custom', endpoint, input.model.trim(),
       input.apiKey ? encrypt(input.apiKey) : null, input.isDefault ? 1 : 0],
   );
   if (input.isDefault) await setDefaultProvider(ctx, id);
@@ -53,7 +54,7 @@ export async function createProvider(ctx: RoleContext, input: ProviderInput): Pr
 }
 
 export async function updateProvider(ctx: RoleContext, id: string, input: Partial<ProviderInput> & { status?: 'ACTIVE' | 'DISABLED' }): Promise<void> {
-  const row = await getProviderRow(ctx.appId, id, ctx.role); // 跨作用域 404
+  const row = await getProviderRow(ctx.appId, id, ctx.wsId); // 跨工作区 404
   const sets: string[] = [];
   const params: unknown[] = [];
   if (input.name !== undefined) { sets.push('name=?'); params.push(input.name); }
@@ -69,21 +70,22 @@ export async function updateProvider(ctx: RoleContext, id: string, input: Partia
 }
 
 export async function deleteProvider(ctx: RoleContext, id: string): Promise<void> {
-  await getProviderRow(ctx.appId, id, ctx.role); // 跨作用域 404
-  await pRun('DELETE FROM llm_provider WHERE id=? AND app_id=?', [id, ctx.appId]);
+  await getProviderRow(ctx.appId, id, ctx.wsId); // 跨工作区 404
+  await pRun('DELETE FROM llm_provider WHERE id=? AND app_id=? AND ws_id=?', [id, ctx.appId, ctx.wsId]);
 }
 
 export async function setDefaultProvider(ctx: RoleContext, id: string): Promise<void> {
-  const row = await getProviderRow(ctx.appId, id, ctx.role); // 跨作用域 404
-  // 只清「同作用域」内的默认标记——开发者默认与甲方默认互不干扰
-  await pRun('UPDATE llm_provider SET is_default=0 WHERE app_id=? AND scope=?', [ctx.appId, row.scope]);
+  const row = await getProviderRow(ctx.appId, id, ctx.wsId); // 跨工作区 404
+  // 只清「本工作区」内的默认标记——各工作区互不干扰
+  await pRun('UPDATE llm_provider SET is_default=0 WHERE app_id=? AND ws_id=?', [ctx.appId, ctx.wsId]);
   await pRun('UPDATE llm_provider SET is_default=1 WHERE id=? AND app_id=?', [id, ctx.appId]);
 }
 
-export async function getProviderRow(appId: string, id: string, scope?: 'DEVELOPER' | 'CLIENT'): Promise<LlmProviderRow> {
+// 按工作区取模型行：跨工作区一律 404（开发者拿不到别人的密钥，甲方也拿不到开发者的）
+export async function getProviderRow(appId: string, id: string, wsId?: string): Promise<LlmProviderRow> {
   const r = await pGet<LlmProviderRow>(
-    scope ? 'SELECT * FROM llm_provider WHERE id=? AND app_id=? AND scope=?' : 'SELECT * FROM llm_provider WHERE id=? AND app_id=?',
-    scope ? [id, appId, scope] : [id, appId],
+    wsId ? 'SELECT * FROM llm_provider WHERE id=? AND app_id=? AND ws_id=?' : 'SELECT * FROM llm_provider WHERE id=? AND app_id=?',
+    wsId ? [id, appId, wsId] : [id, appId],
   );
   if (!r) throw new HttpError(404, 'PROVIDER_NOT_FOUND');
   return r;
@@ -99,18 +101,18 @@ export interface ResolvedProvider {
 }
 
 // 生成 SQL 时取模型：显式指定 > 本角色默认 > 应用 settings.llm > 环境变量。
-// 关键点：必须按 scope=ctx.role 过滤——甲方生成用甲方的模型，开发者用开发者的，各是各的配置。
+// 关键点：必须按 scope=ctx.role 过滤——甲方（/c，CLIENT）生成用甲方的模型，开发者（/d，DEVELOPER）用开发者的，各是各的。
 export async function resolveProvider(ctx: RoleContext, providerId?: string | null): Promise<ResolvedProvider | null> {
   let row: LlmProviderRow | undefined;
   if (providerId) {
     row = await pGet<LlmProviderRow>(
-      `SELECT * FROM llm_provider WHERE id=? AND app_id=? AND scope=? AND status='ACTIVE'`, [providerId, ctx.appId, ctx.role],
+      `SELECT * FROM llm_provider WHERE id=? AND app_id=? AND ws_id=? AND scope=? AND status='ACTIVE'`, [providerId, ctx.appId, ctx.wsId, ctx.role],
     );
     if (!row) throw new HttpError(404, 'PROVIDER_NOT_FOUND');
   } else {
     row = await pGet<LlmProviderRow>(
-      `SELECT * FROM llm_provider WHERE app_id=? AND scope=? AND status='ACTIVE' ORDER BY is_default DESC, created_at LIMIT 1`,
-      [ctx.appId, ctx.role],
+      `SELECT * FROM llm_provider WHERE app_id=? AND ws_id=? AND scope=? AND status='ACTIVE' ORDER BY is_default DESC, created_at LIMIT 1`,
+      [ctx.appId, ctx.wsId, ctx.role],
     );
   }
   if (row) {

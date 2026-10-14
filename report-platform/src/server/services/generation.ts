@@ -73,12 +73,13 @@ function sharedTokenLen(a: string, b: string): number {
   return n;
 }
 
-// 参与本次生成的数据源：显式指定多个 > 单个 > 本应用全部 ACTIVE 数据源
+// 参与本次生成的数据源：显式指定多个 > 单个 > 本工作区全部 ACTIVE 数据源。
+// 开发者只在自己工作区的库里生成；甲方（汇总方）可跨本应用所有开发者的库生成。
 async function resolveTargets(ctx: RoleContext, input: GenerateInput): Promise<DataSourceRow[]> {
   let ids = (input.dataSourceIds ?? []).filter(Boolean);
   if (!ids.length && input.dataSourceId) ids = [input.dataSourceId];
   if (!ids.length) {
-    const all = await listDataSources(ctx.appId);
+    const all = await listDataSources(ctx);
     ids = all.filter((d) => d.status === 'ACTIVE').map((d) => d.id);
   }
   if (!ids.length) throw new HttpError(400, 'NO_DATA_SOURCE');
