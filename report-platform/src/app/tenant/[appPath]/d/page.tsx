@@ -51,6 +51,10 @@ export default function DevPage() {
   const [providers, setProviders] = useState<any[]>([]);
   const [llmForm, setLlmForm] = useState(() => initialProviderForm(true));
   const [llmTest, setLlmTest] = useState<Record<string, string>>({});
+  // 「模型配置」已收进「报表」「需求收件箱」内联显示，默认折叠，避免挤压主内容
+  const [llmOpen, setLlmOpen] = useState(false);
+  // 「新建报表」表单较高（SQL 输入框 + 参数），默认折叠，让「已有报表」列表不被挤下去
+  const [newReportOpen, setNewReportOpen] = useState(false);
 
   // 需求
   const [reqs, setReqs] = useState<any[]>([]);
@@ -530,6 +534,67 @@ export default function DevPage() {
 
   if (!boot) return <div className="layout"><div className="topbar"><span className="app-name">加载中…</span></div></div>;
 
+  // 模型配置面板内容：在「模型配置」整页、以及「报表」「需求收件箱」内联处复用
+  const llmBody = (
+    <>
+      <div style={{ margin: '10px 0' }}>
+        {providers.length === 0 && (
+          <div className="muted">还没配置模型。不配也能跑，只是「生成 SQL」会降级为手工模式。</div>
+        )}
+        {providers.map((p) => (
+          <div key={p.id} className="row" style={{ justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ minWidth: 260 }}>
+              <strong>{p.name}</strong>
+              {!!p.is_default && <span className="badge">默认</span>}
+              {p.status === 'DISABLED' && <span className="pill rec">已停用</span>}
+              <div className="muted" style={{ fontSize: 12 }}>
+                {vendorLabel(p.vendor)} · {p.model} · {p.endpoint} · {p.has_key ? '已配置密钥' : '无密钥（本地）'}
+              </div>
+              {llmTest[p.id] && <div className="muted" style={{ fontSize: 12 }}>{llmTest[p.id]}</div>}
+            </div>
+            <div className="row">
+              <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => testProviderCall(p.id)}>测试连接</button>
+              {!p.is_default && <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => makeDefaultProvider(p.id)}>设为默认</button>}
+              <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => toggleProvider(p)}>{p.status === 'ACTIVE' ? '停用' : '启用'}</button>
+              <button className="danger" style={{ padding: '2px 8px' }} onClick={() => delProvider(p)}>删除</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="row">
+        <select value={llmForm.vendor} onChange={(e) => applyPreset(e.target.value)} style={{ maxWidth: 220 }}>
+          {LLM_PRESETS.map((p) => <option key={p.vendor} value={p.vendor}>{p.label}</option>)}
+        </select>
+        <input placeholder="显示名" value={llmForm.name} onChange={(e) => setLlmForm({ ...llmForm, name: e.target.value })} />
+        <input placeholder="接口地址（endpoint）" value={llmForm.endpoint} onChange={(e) => setLlmForm({ ...llmForm, endpoint: e.target.value })} />
+        <input placeholder="模型名" list="llm-models" value={llmForm.model} onChange={(e) => setLlmForm({ ...llmForm, model: e.target.value })} />
+        <datalist id="llm-models">
+          {(presetOf(llmForm.vendor)?.models ?? []).map((m) => <option key={m} value={m} />)}
+        </datalist>
+        <input type="password" placeholder={presetOf(llmForm.vendor)?.keyHint || 'API Key（本地模型可留空）'}
+          value={llmForm.apiKey} onChange={(e) => setLlmForm({ ...llmForm, apiKey: e.target.value })} />
+        <label className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={llmForm.isDefault}
+            onChange={(e) => setLlmForm({ ...llmForm, isDefault: e.target.checked })} />设为默认
+        </label>
+        <button onClick={createProvider}>添加模型</button>
+      </div>
+      {presetOf(llmForm.vendor)?.note && <div className="muted" style={{ marginTop: 6 }}>※ {presetOf(llmForm.vendor)?.note}</div>}
+    </>
+  );
+
+  // 内联到「报表」「需求收件箱」的折叠版模型配置（默认收起，不挤压主内容）
+  const llmInline = (
+    <div className="card">
+      <div className="row" style={{ cursor: 'pointer' }} onClick={() => setLlmOpen((o) => !o)}>
+        <strong>模型配置</strong>
+        <span className="muted">配置后即可用模型生成 SQL；密钥 AES 加密入库，接口永不回显</span>
+        <span className="badge" style={{ marginLeft: 'auto' }}>{llmOpen ? '收起' : '展开'}</span>
+      </div>
+      {llmOpen && llmBody}
+    </div>
+  );
+
   return (
     <div className="layout">
       <div className="topbar">
@@ -544,7 +609,7 @@ export default function DevPage() {
           <div className={'node' + (tab === 'doc' ? ' on' : '')} onClick={() => setTab('doc')}>数据库结构文档</div>
           <div className={'node' + (tab === 'req' ? ' on' : '')} onClick={() => setTab('req')}>需求收件箱</div>
           <div className={'node' + (tab === 'reports' ? ' on' : '')} onClick={() => setTab('reports')}>报表（{normalReports.length}）</div>
-          <div className={'node' + (tab === 'llm' ? ' on' : '')} onClick={() => setTab('llm')}>模型配置</div>
+          {/* 模型配置不再单独占一个菜单：已内联进「报表」与「需求收件箱」，用到模型的地方就近配置 */}
           {boot.app.isPlatformRoot && <div className={'node' + (tab === 'apps' ? ' on' : '')} onClick={() => setTab('apps')}>应用管理</div>}
           <div className={'node' + (tab === 'bin' ? ' on' : '')} onClick={() => setTab('bin')}>回收站（{binReports.length}）</div>
         </div>
@@ -629,8 +694,14 @@ export default function DevPage() {
 
           {tab === 'reports' && (
             <>
+              {llmInline}
               <div className="card">
-                <strong>新建报表（直接写 SQL）</strong>
+                <div className="row" style={{ cursor: 'pointer' }} onClick={() => setNewReportOpen((o) => !o)}>
+                  <strong>新建报表（直接写 SQL）</strong>
+                  <span className="badge" style={{ marginLeft: 'auto' }}>{newReportOpen ? '收起' : '展开'}</span>
+                </div>
+                {newReportOpen && (
+                <>
                 <div className="row" style={{ margin: '10px 0' }}>
                   <input
                     placeholder="报表名称"
@@ -704,6 +775,8 @@ export default function DevPage() {
                     </table>
                   </div>
                 )}
+                </>
+                )}
               </div>
 
               <div className="card">
@@ -757,49 +830,7 @@ export default function DevPage() {
                 <strong>模型配置</strong>
                 <span className="muted">国内主流厂商 + 本地模型，统一 OpenAI 兼容协议；密钥 AES 加密入库，接口永不回显</span>
               </div>
-              <div style={{ margin: '10px 0' }}>
-                {providers.length === 0 && (
-                  <div className="muted">还没配置模型。不配也能跑，只是「生成 SQL」会降级为手工模式。</div>
-                )}
-                {providers.map((p) => (
-                  <div key={p.id} className="row" style={{ justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                    <div style={{ minWidth: 260 }}>
-                      <strong>{p.name}</strong>
-                      {!!p.is_default && <span className="badge">默认</span>}
-                      {p.status === 'DISABLED' && <span className="pill rec">已停用</span>}
-                      <div className="muted" style={{ fontSize: 12 }}>
-                        {vendorLabel(p.vendor)} · {p.model} · {p.endpoint} · {p.has_key ? '已配置密钥' : '无密钥（本地）'}
-                      </div>
-                      {llmTest[p.id] && <div className="muted" style={{ fontSize: 12 }}>{llmTest[p.id]}</div>}
-                    </div>
-                    <div className="row">
-                      <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => testProviderCall(p.id)}>测试连接</button>
-                      {!p.is_default && <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => makeDefaultProvider(p.id)}>设为默认</button>}
-                      <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => toggleProvider(p)}>{p.status === 'ACTIVE' ? '停用' : '启用'}</button>
-                      <button className="danger" style={{ padding: '2px 8px' }} onClick={() => delProvider(p)}>删除</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="row">
-                <select value={llmForm.vendor} onChange={(e) => applyPreset(e.target.value)} style={{ maxWidth: 220 }}>
-                  {LLM_PRESETS.map((p) => <option key={p.vendor} value={p.vendor}>{p.label}</option>)}
-                </select>
-                <input placeholder="显示名" value={llmForm.name} onChange={(e) => setLlmForm({ ...llmForm, name: e.target.value })} />
-                <input placeholder="接口地址（endpoint）" value={llmForm.endpoint} onChange={(e) => setLlmForm({ ...llmForm, endpoint: e.target.value })} />
-                <input placeholder="模型名" list="llm-models" value={llmForm.model} onChange={(e) => setLlmForm({ ...llmForm, model: e.target.value })} />
-                <datalist id="llm-models">
-                  {(presetOf(llmForm.vendor)?.models ?? []).map((m) => <option key={m} value={m} />)}
-                </datalist>
-                <input type="password" placeholder={presetOf(llmForm.vendor)?.keyHint || 'API Key（本地模型可留空）'}
-                  value={llmForm.apiKey} onChange={(e) => setLlmForm({ ...llmForm, apiKey: e.target.value })} />
-                <label className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}>
-                  <input type="checkbox" style={{ width: 'auto' }} checked={llmForm.isDefault}
-                    onChange={(e) => setLlmForm({ ...llmForm, isDefault: e.target.checked })} />设为默认
-                </label>
-                <button onClick={createProvider}>添加模型</button>
-              </div>
-              {presetOf(llmForm.vendor)?.note && <div className="muted" style={{ marginTop: 6 }}>※ {presetOf(llmForm.vendor)?.note}</div>}
+              {llmBody}
             </div>
           )}
 
@@ -834,7 +865,9 @@ export default function DevPage() {
           )}
 
           {tab === 'req' && (
-            <div className="card">
+            <>
+              {llmInline}
+              <div className="card">
               <strong>需求收件箱（{reqs.length}）</strong>
               {reqs.length === 0 && <div className="muted">暂无需求。甲方在未配置模型时点「{clientCanViewSql ? '生成 SQL' : '生成报表'}」，需求会自动出现在这里。</div>}
               {reqs.map((q) => (
@@ -943,7 +976,8 @@ export default function DevPage() {
                   {reqPrevMsg && <div className="muted" style={{ marginTop: 6 }}>{reqPrevMsg}</div>}
                 </div>
               )}
-            </div>
+              </div>
+            </>
           )}
         </div>
       </div>
