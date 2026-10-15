@@ -15,9 +15,14 @@ async function ensureOwn(req: Request, id: string, ctxAppId: string) {
 }
 
 // GET /data-sources/{id}/schema?refresh=1 —— 数据库结构文档（数据字典）
+// 甲乙方都可看结构（不暴露数据），但与「甲方可见 SQL」绑定同一开关：开发者关闭后甲方既不能看 SQL
+// 也不能看结构文档（两者都属「暴露库表结构」）。开发者始终可见（REQ-META-04 的延伸）。
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   return withRole(req, async (ctx) => {
+    if (ctx.role === 'CLIENT' && !ctx.settings.clientCanViewSql) {
+      throw new HttpError(403, 'CLIENT_SCHEMA_HIDDEN');
+    }
     await ensureOwn(req, id, ctx.appId);
     const force = new URL(req.url).searchParams.get('refresh') === '1';
     const doc = await getSchemaDoc(id, force);

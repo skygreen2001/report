@@ -516,25 +516,25 @@ export default function DevPage() {
           {err && <div className="card err">⚠ {err}</div>}
           {msg && <div className="card ok">✓ {msg}</div>}
 
-          {/* 应用级可见性开关：开发者控制甲方能否看到报表背后的 SQL */}
-          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <label className="switch" style={{ margin: 0 }}>
-              <input type="checkbox" checked={clientCanViewSql} disabled={settingBusy}
-                onChange={(e) => toggleClientCanViewSql(e.target.checked)} />
-              <span className="slider" />
-            </label>
-            <div>
-              <strong>甲方可见 SQL</strong>
-              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                开启后甲方在报表详情可见<strong>当前生效</strong>的 SQL（便于技术型甲方核对口径）；历史版本恒定不可见。默认关闭以防表结构外泄。
-              </div>
-            </div>
-            <span className={'pill' + (clientCanViewSql ? ' ok' : ' rec')} style={{ marginLeft: 'auto' }}>
-              {clientCanViewSql ? '已开启' : '已关闭'}
-            </span>
-          </div>
-
           {tab === 'ds' && (
+            <>
+            {/* 应用级可见性开关：开发者控制甲方能否看到报表背后的 SQL（及数据库结构文档） */}
+            <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <label className="switch" style={{ margin: 0 }}>
+                <input type="checkbox" checked={clientCanViewSql} disabled={settingBusy}
+                  onChange={(e) => toggleClientCanViewSql(e.target.checked)} />
+                <span className="slider" />
+              </label>
+              <div>
+                <strong>甲方可见 SQL</strong>
+                <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                  开启后甲方在报表详情可见<strong>当前生效</strong>的 SQL，并可在「数据库结构文档」查看表/字段含义（便于技术型甲方核对口径）；两者历史版本恒定不可见。默认关闭以防表结构外泄。
+                </div>
+              </div>
+              <span className={'pill' + (clientCanViewSql ? ' ok' : ' rec')} style={{ marginLeft: 'auto' }}>
+                {clientCanViewSql ? '已开启' : '已关闭'}
+              </span>
+            </div>
             <div className="card">
               <strong>数据源（只读账号）</strong>
               <div className="row" style={{ margin: '10px 0' }}>
@@ -580,7 +580,7 @@ export default function DevPage() {
               </div>
               <div className="muted" style={{ marginTop: 6 }}>只读账号示例：report_ro / ReportRo@2026（仅 SELECT）。M0 验收：测试连接后 INSERT 应失败。</div>
             </div>
-          )}
+          </>)}
 
           {tab === 'doc' && (
             <SchemaDoc

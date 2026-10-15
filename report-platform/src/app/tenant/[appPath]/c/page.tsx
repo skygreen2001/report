@@ -23,6 +23,8 @@ export default function ClientPage() {
   const [tab, setTab] = useState<'gen' | 'reports' | 'bin' | 'doc' | 'llm'>('reports');
   const [appName, setAppName] = useState('');
   const [settings, setSettings] = useState<Settings | null>(null);
+  // 甲方不可见 SQL 时，生成动作的对外口径统一叫「生成报表」（不再提「SQL」，因为甲方看不到 SQL）
+  const genLabel = settings?.clientCanViewSql ? '生成 SQL' : '生成报表';
   const [prompt, setPrompt] = useState('');
   const [sql, setSql] = useState('');
   const [understanding, setUnderstanding] = useState('');
@@ -66,11 +68,12 @@ export default function ClientPage() {
     } catch (e: any) { setErr('加载失败：' + e.message); }
   }
   useEffect(() => { loadBoot(); }, [api]);
-  // 支持 /{app}/c?tab=doc 直达结构文档
+  // 支持 /{app}/c?tab=doc 直达结构文档；但结构文档受「甲方可见 SQL」开关约束，关时即使深链也不跳转
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get('tab');
-    if (t === 'doc' || t === 'gen' || t === 'reports') setTab(t);
-  }, []);
+    if (t === 'gen' || t === 'reports') setTab(t);
+    if (t === 'doc' && settings?.clientCanViewSql) setTab('doc');
+  }, [settings?.clientCanViewSql]);
 
   // —— 模型配置（甲方自己的作用域）——
   function applyPreset(vendor: string) {
@@ -419,7 +422,9 @@ export default function ClientPage() {
             我的报表（{normalReports.length}）
           </div>
           <div className={'node' + (tab === 'gen' ? ' on' : '')} onClick={() => setTab('gen')}>生成新报表</div>
-          <div className={'node' + (tab === 'doc' ? ' on' : '')} onClick={() => setTab('doc')}>数据库结构文档</div>
+          {settings?.clientCanViewSql && (
+            <div className={'node' + (tab === 'doc' ? ' on' : '')} onClick={() => setTab('doc')}>数据库结构文档</div>
+          )}
           <div className={'node' + (tab === 'llm' ? ' on' : '')} onClick={() => setTab('llm')}>模型配置</div>
           <div className={'node bin' + (tab === 'bin' ? ' on' : '')} onClick={() => setTab('bin')}>回收站（{binReports.length}）</div>
           <h4>提示</h4>
@@ -495,7 +500,7 @@ export default function ClientPage() {
                     <option value="">默认模型</option>
                     {providers.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.model}</option>)}
                   </select>
-                  <button onClick={gen} disabled={genLoading || !dsId}>生成 SQL</button>
+                  <button onClick={gen} disabled={genLoading || !dsId}>{genLabel}</button>
                   {!dsId && (
                     <span className="err">
                       当前应用（/{appPath}）还没有可用数据源：请开发者进入「开发者端 → 数据源」新建，并点「设为默认」
@@ -504,7 +509,7 @@ export default function ClientPage() {
                 </div>
                 {providers.length === 0 && (
                   <div className="muted" style={{ marginTop: 8 }}>
-                    你还没有配置模型。点「生成 SQL」会把需求描述直接提交给开发者，由开发者据此生成报表；或到「模型配置」添加你自己的模型（含本地模型）。
+                    你还没有配置模型。点「{genLabel}」会把需求描述直接提交给开发者，由开发者据此生成报表；或到「模型配置」添加你自己的模型（含本地模型）。
                   </div>
                 )}
               </div>
@@ -513,7 +518,7 @@ export default function ClientPage() {
                 <div className="card gen-loading">
                   <div className="gen-status">
                     <span className="gen-spinner" />
-                    <strong>正在生成 SQL</strong>
+                    <strong>正在{genLabel}</strong>
                   </div>
                   <div className="gen-progress" />
                   <div className="gen-stage">{genStage}</div>
@@ -589,7 +594,7 @@ export default function ClientPage() {
             </>
           )}
 
-          {tab === 'doc' && (
+          {tab === 'doc' && settings?.clientCanViewSql && (
             <SchemaDoc api={api} dataSources={dsList} defaultId={settings?.defaultDs ?? undefined} />
           )}
 
@@ -601,7 +606,7 @@ export default function ClientPage() {
               </div>
               <div style={{ margin: '10px 0' }}>
                 {providers.length === 0 && (
-                  <div className="muted">还没配置模型。不配也能跑，只是「生成 SQL」会降级为手工模式。</div>
+                  <div className="muted">还没配置模型。不配也能跑，只是「{genLabel}」会降级为手工模式。</div>
                 )}
                 {providers.map((p) => (
                   <div key={p.id} className="row" style={{ justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
