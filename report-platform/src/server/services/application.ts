@@ -3,9 +3,9 @@ import { pGet, pQuery, pRun } from '../db/platform';
 import { initClientTree } from './tagTree';
 import { ensureDefaultWorkspace } from './devWorkspace';
 import { HttpError } from '../errors';
+import { parseSettings, invalidateAppCache } from '../context';
 import type { ApplicationRow, AppSettings, RoleContext } from '@/lib/types';
 import crypto from 'node:crypto';
-import { invalidateAppCache } from '../context';
 
 export interface CreateAppInput {
   name: string;
@@ -84,4 +84,18 @@ export async function ensurePlatformRoot(): Promise<string> {
   await initClientTree(id);
   await ensureDefaultWorkspace(id);
   return id;
+}
+
+// 改应用级设置（开发者用：目前承载 clientCanViewSql 等）。合并后写回 settings_json，并即时失效缓存
+// （否则开发者切换开关后，甲方侧要等 60s 缓存 TTL 才更新）。仅接受已知字段，未识别的忽略。
+export async function updateAppSettings(appId: string, patch: Partial<AppSettings>): Promise<AppSettings> {
+  const row = await pGet<ApplicationRow>('SELECT id, host, path_prefix, settings_json FROM application WHERE id=?', [appId]);
+  if (!row) throw new HttpError(404, 'APP_NOT_FOUND');
+  const cur = parseSettings(row.settings_json);
+  const next: AppSettings = { ...cur };
+  if (typeof patch.clientCanViewSql === 'boolean') next.clientCanViewSql = patch.clientCanViewSql;
+  // 其他未来设置字段在此处逐个认领即可，结构保持不变
+  await pRun('UPDATE application SET settings_json=? WHERE id=?', [JSON.stringify(next), appId]);
+  invalidateAppCache(row.host, row.path_prefix);
+  return next;
 }

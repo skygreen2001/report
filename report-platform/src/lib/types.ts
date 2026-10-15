@@ -115,8 +115,9 @@ export interface RoleContext {
   settings: AppSettings;
   app: ApplicationRow;
   // 当前「人」的工作区：开发者配置按人隔离的关键维度。
-  // 不带 ws 参数 → 应用默认工作区（主开发者空间）；带 ws=<key> → 该使用者自己的私密空间。
+  // 身份由浏览器 Cookie 承载（首次访问随机生成）；wsKey 即该身份本身，换设备时用 ?ws=<wsKey> 带走。
   wsId: string;
+  wsKey: string;
 }
 
 export type RunSource = 'PREVIEW' | 'EXPORT' | 'SAVE' | 'DEV_DEBUG';

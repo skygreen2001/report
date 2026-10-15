@@ -14,6 +14,10 @@ export default function DevPage() {
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
 
+  // 应用级设置：甲方是否可见当前生效 SQL（开发者开关）
+  const [clientCanViewSql, setClientCanViewSql] = useState(false);
+  const [settingBusy, setSettingBusy] = useState(false);
+
   // 数据源表单
   const [dsForm, setDsForm] = useState({ name: '', host: '127.0.0.1', port: 3306, database_name: 'biz_demo', username: 'report_ro', password: 'ReportRo@2026' });
   const [dsList, setDsList] = useState<any[]>([]);
@@ -90,6 +94,8 @@ export default function DevPage() {
     setDsList(d.dataSources || []);
     setReports(d.reports || []);
     setProviders(d.llmProviders || []);
+    // 甲方可见 SQL 开关：以服务端设置为准（开发者切换后立即回写，刷新首屏也从此处取）
+    setClientCanViewSql(!!d.settings?.clientCanViewSql);
     // 新建报表的数据源默认取应用默认数据源
     setNewForm((f) => (f.dataSourceId ? f : { ...f, dataSourceId: d.settings?.defaultDs ?? '' }));
     if (d.app.isPlatformRoot) {
@@ -117,6 +123,24 @@ export default function DevPage() {
     const r = await fetch(`${api}/data-sources/${id}/test`, { method: 'POST' });
     const d = await r.json();
     setTestResult((p) => ({ ...p, [id]: d.ok ? (d.isReadonly ? '连接成功 · 只读✓' : '连接成功 · 但非只读✗') : '连接失败' }));
+  }
+
+  // 切换「甲方可见 SQL」开关（仅写入当前生效 SQL 可见性；历史版本恒定对甲方不可见）
+  async function toggleClientCanViewSql(v: boolean) {
+    setSettingBusy(true);
+    setErr(''); setMsg('');
+    try {
+      const r = await fetch(`${api}/settings`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientCanViewSql: v }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.message || '保存失败'); return; }
+      setClientCanViewSql(v);
+      setMsg(v ? '已开启：甲方可见当前生效 SQL' : '已关闭：甲方不可见 SQL（默认）');
+    } finally {
+      setSettingBusy(false);
+    }
   }
   async function makeDefault(id: string) {
     setErr(''); setMsg('');
@@ -491,6 +515,24 @@ export default function DevPage() {
         <div className="content">
           {err && <div className="card err">⚠ {err}</div>}
           {msg && <div className="card ok">✓ {msg}</div>}
+
+          {/* 应用级可见性开关：开发者控制甲方能否看到报表背后的 SQL */}
+          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <label className="switch" style={{ margin: 0 }}>
+              <input type="checkbox" checked={clientCanViewSql} disabled={settingBusy}
+                onChange={(e) => toggleClientCanViewSql(e.target.checked)} />
+              <span className="slider" />
+            </label>
+            <div>
+              <strong>甲方可见 SQL</strong>
+              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                开启后甲方在报表详情可见<strong>当前生效</strong>的 SQL（便于技术型甲方核对口径）；历史版本恒定不可见。默认关闭以防表结构外泄。
+              </div>
+            </div>
+            <span className={'pill' + (clientCanViewSql ? ' ok' : ' rec')} style={{ marginLeft: 'auto' }}>
+              {clientCanViewSql ? '已开启' : '已关闭'}
+            </span>
+          </div>
 
           {tab === 'ds' && (
             <div className="card">

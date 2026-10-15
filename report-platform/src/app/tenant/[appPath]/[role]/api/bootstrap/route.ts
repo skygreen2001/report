@@ -25,8 +25,9 @@ export async function GET(req: Request) {
     return json({
       app: { id: ctx.appId, name: ctx.app.name, isPlatformRoot: !!ctx.app.is_platform_root },
       role: ctx.role,
-      // 当前访问者所处的「开发者工作区」：甲方＝OWNER（自己的），外部开发者＝他自己的
-      workspace: { id: ctx.wsId },
+      // 当前访问者所处的「开发者工作区」。ws_key 就是他的身份（capability URL 的凭据），
+      // 只回给本人：换设备时用 /{appPath}/d?ws=<wsKey> 即可把这套配置搬过去。
+      workspace: { id: ctx.wsId, wsKey: ctx.wsKey },
       settings: { ...ctx.settings, defaultDs },
       reports,
       tagTree: nodes,

@@ -53,7 +53,7 @@ async function main() {
   );
   const ds = (await pGet<any>('SELECT * FROM data_source WHERE id=?', [dsId]))!;
 
-  const base = { appId, settings: defaultSettings(), app, wsId: ws.id } as const;
+  const base = { appId, settings: defaultSettings(), app, wsId: ws.id, wsKey: ws.ws_key } as const;
   const dev: RoleContext = { ...base, role: 'DEVELOPER', clientKey: 'dev-1' };
   const cli: RoleContext = { ...base, role: 'CLIENT', clientKey: 'cli-1' };
 
@@ -181,7 +181,7 @@ async function main() {
   const rootWs = await getDefaultWorkspace(rootApp.id);
   const rootCtx: RoleContext = {
     appId: rootApp.id, role: 'DEVELOPER', clientKey: 'root', settings: defaultSettings(), app: rootApp,
-    wsId: rootWs.id,
+    wsId: rootWs.id, wsKey: rootWs.ws_key,
   };
   await expectCode(() => disableApplication(dev, rootApp.id), 'NOT_PLATFORM_ROOT', '非平台根应用不能停用别的应用');
   await expectCode(() => disableApplication(rootCtx, rootApp.id), 'CANNOT_DISABLE_ROOT', '平台根应用自身不可停用');

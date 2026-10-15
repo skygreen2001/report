@@ -67,3 +67,15 @@ bash scripts/smoke-http.sh                                     # Web E2E 15 例
 - **开发者据此生成 SQL**：`d/page.tsx` 需求收件箱每项加「据此生成 SQL」→ 内联生成器（需求描述/数据源/开发者模型/生成/预览/保存为报表并通知甲方）。`requirement.ts` 新增 `fulfillRequirement(ctx,id,reportId)`（标记 `PENDING_CONFIRM` 并回填 `report_id`）；`requirements/[id]/route.ts` POST 开发者分支支持 `{reportId}` 一键完成。保存后报表共享、甲方端立即可见。
 - 验证：客户端无模型生成返回 `noModel:true`；模拟前端提交需求→开发者收件箱可见→建报表→fulfill 置 `PENDING_CONFIRM`+回填 `report_id`→甲方 `bootstrap.reports` 可见；跨角色模型隔离仍成立（甲方 0 / 开发者 2）；tsc 0、网关 20/20。
 
+## 多用户隔离：浏览器身份模型（dev_workspace，2026-10-13 起）
+
+- **模型**：人人平等、无层级。身份 = 浏览器 Cookie 里的随机串（中间件首次访问生成，18 位 hex）；
+  `?ws=<key>` 可把身份搬到别的设备；配置（数据源/模型/目录）仍存服务器按 `ws_id` 隔离；报表共享。
+  `/d` 只看到自己的配置，`/c` 汇总所有人的报表。
+- **查身份 key**：`ws_key` 是 `report_platform.dev_workspace` 表的一列。三种方式：
+  ① 浏览器打开 `/{app}/d/api/bootstrap` → `workspace.wsKey`（已回传，界面零改动）；
+  ② `scripts/ws-list.ts`（常驻脚本，列出全部 key + 换设备链接）；③ 直接查 MySQL。
+- **⚠ 联调后必须复位**：第一个调 `/api/*` 的浏览器会认领 `claimed=0` 的工作区并把 `ws_key` 换成自己的，
+  否则用户浏览器会拿到空空间看不到老配置。复位 = `UPDATE dev_workspace SET claimed=0` + 删测试工作区
+  （连同 `tag_node WHERE ws_id=...`）。页面本身不触发认领，只有 API 会。
+

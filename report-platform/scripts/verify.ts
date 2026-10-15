@@ -28,7 +28,7 @@ async function main() {
   const ws = await getDefaultWorkspace(app.id);
   const ctx: RoleContext = {
     appId: app.id, role: 'CLIENT', clientKey: 'verify', settings: defaultSettings(), app,
-    wsId: ws.id,
+    wsId: ws.id, wsKey: ws.ws_key,
   };
 
   console.log('=== ① 正常预览（GROUP BY 聚合，走 SQL 网关）===');

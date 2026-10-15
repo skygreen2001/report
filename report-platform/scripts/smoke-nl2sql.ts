@@ -26,7 +26,7 @@ async function main() {
   const ws = await getDefaultWorkspace(app.id);
   const ctx: RoleContext = {
     appId: app.id, role: 'DEVELOPER', clientKey: 'smoke', settings: defaultSettings(), app,
-    wsId: ws.id,
+    wsId: ws.id, wsKey: ws.ws_key,
   };
 
   console.log('=== M2 NL2SQL 在线生成（DeepSeek）===');

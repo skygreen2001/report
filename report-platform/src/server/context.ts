@@ -112,6 +112,7 @@ export async function resolveContext(req: Request): Promise<RoleContext> {
     settings: parseSettings(app.settings_json),
     app,
     wsId: ws.id,
+    wsKey: ws.ws_key,
   };
 }
 
