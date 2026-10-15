@@ -68,7 +68,7 @@ function humanizeZodMessage(msg?: string): string {
 export function toErrorResponse(e: unknown, role: 'CLIENT' | 'DEVELOPER'): { status: number; body: ErrorBody } {
   const traceId = randomTrace();
   if (e instanceof HttpError) {
-    return { status: e.status, body: { code: e.code, message: e.code, traceId } };
+    return { status: e.status, body: { code: e.code, message: e.message, traceId } };
   }
   if (e instanceof SqlReject) {
     // 规则编号本身可展示；开发者额外拿到明细（如表名/列名），甲方只见编号。

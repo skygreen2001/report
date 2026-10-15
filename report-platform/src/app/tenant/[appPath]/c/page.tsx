@@ -34,6 +34,7 @@ export default function ClientPage() {
   const [reportName, setReportName] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  const [appUnavailable, setAppUnavailable] = useState('');
   const [busy, setBusy] = useState(false);
 
   // 我的报表（开发者发布的 + 自己保存的；双轨可见性已在接口层过滤）
@@ -58,7 +59,12 @@ export default function ClientPage() {
     try {
       const r = await fetch(`${api}/bootstrap`, { cache: 'no-store' });
       const d = await r.json();
-      if (!r.ok) { setErr(d.message || '加载失败'); return; }
+      if (!r.ok) {
+        // 应用不存在/已删除/已停用：给出友好提示，不渲染空白外壳（REQ-UX 友好错误页）
+        if (d.code === 'APP_NOT_FOUND' || d.code === 'APP_DISABLED') setAppUnavailable(d.message || '应用不可用');
+        else setErr(d.message || '加载失败');
+        return;
+      }
       setAppName(d.app.name);
       setSettings(d.settings);
       setReports(d.reports || []);
@@ -401,6 +407,20 @@ export default function ClientPage() {
           {recycled
             ? <button className="ghost" disabled={busy} onClick={() => restoreRep(r.id)}>还原</button>
             : <button className="ghost" disabled={busy} onClick={() => delReport(r.id)}>删除</button>}
+        </div>
+      </div>
+    );
+  }
+
+  if (appUnavailable) {
+    return (
+      <div className="unavailable">
+        <div className="card" style={{ maxWidth: 460, textAlign: 'center', padding: 32 }}>
+          <h2 style={{ margin: '0 0 10px', color: 'var(--danger)' }}>应用不可用</h2>
+          <p className="muted" style={{ margin: 0 }}>{appUnavailable}</p>
+          <p className="muted" style={{ fontSize: 12, marginTop: 14, marginBottom: 0 }}>
+            如果你认为这是误操作，请联系该应用的开发者或平台管理员。
+          </p>
         </div>
       </div>
     );

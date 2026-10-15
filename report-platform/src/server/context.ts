@@ -94,9 +94,13 @@ export async function resolveContext(req: Request): Promise<RoleContext> {
 
   // 平台根应用按固定 path_prefix 解析；普通应用由 host+path_prefix 定位
   const app = await getApplicationByHostPath(host, appPath);
-  if (!app || app.status !== 'ACTIVE') {
-    // 不泄露应用名/报表名/库表名（REQ-ACC-07、§17.1）
-    throw new HttpError(404, 'APP_NOT_FOUND');
+  if (!app) {
+    // 路径不存在或应用已被删除：统一提示，不泄露应用名/报表名/库表名（REQ-ACC-07、§17.1）
+    throw new HttpError(404, 'APP_NOT_FOUND', '应用不存在或已删除，无法访问');
+  }
+  if (app.status !== 'ACTIVE') {
+    // 应用存在但被停用：明确告知，便于用户联系开发者重新启用
+    throw new HttpError(404, 'APP_DISABLED', '该应用已停用，暂不可用（如需恢复请联系开发者启用）');
   }
 
   // 工作区：开发者配置按「人」隔离的关键维度。
