@@ -1,5 +1,5 @@
 // 应用服务（doc §5、§17.1）。平台根应用创建/停用；普通应用创建后初始化两棵树（REQ-ACC-10/11/13）。
-import { pGet, pQuery, pRun } from '../db/platform';
+import { pGet, pQuery, pRun, platformTx } from '../db/platform';
 import { initClientTree } from './tagTree';
 import { ensureDefaultWorkspace } from './devWorkspace';
 import { HttpError } from '../errors';
@@ -15,6 +15,12 @@ export interface CreateAppInput {
 }
 
 export async function createApplication(input: CreateAppInput): Promise<string> {
+  // 防重复路径前缀（uk_host_path 为 (host, path_prefix)，host 当前恒为空串）
+  const dup = await pGet<ApplicationRow>(
+    'SELECT id FROM application WHERE host=? AND path_prefix=?',
+    [input.host ?? '', input.pathPrefix],
+  );
+  if (dup) throw new HttpError(409, 'PATH_PREFIX_DUPLICATE');
   const id = crypto.randomUUID();
   const settings: AppSettings = {
     clientCanViewSql: false,
@@ -40,6 +46,7 @@ export async function createApplication(input: CreateAppInput): Promise<string> 
 
 // 仅平台根应用可用（REQ-ACC-10）。停用根应用被拒（REQ-ACC-13）。
 export async function disableApplication(ctx: RoleContext, id: string): Promise<void> {
+  if (ctx.role !== 'DEVELOPER') throw new HttpError(403, 'REQUIRES_DEVELOPER');
   if (!ctx.app.is_platform_root) throw new HttpError(403, 'NOT_PLATFORM_ROOT');
   const app = await pGet<ApplicationRow>('SELECT * FROM application WHERE id=?', [id]);
   if (!app) throw new HttpError(404, 'APP_NOT_FOUND');
@@ -50,6 +57,7 @@ export async function disableApplication(ctx: RoleContext, id: string): Promise<
 
 // 重新启用（停用可逆，否则误点一次只能改库）
 export async function enableApplication(ctx: RoleContext, id: string): Promise<void> {
+  if (ctx.role !== 'DEVELOPER') throw new HttpError(403, 'REQUIRES_DEVELOPER');
   if (!ctx.app.is_platform_root) throw new HttpError(403, 'NOT_PLATFORM_ROOT');
   const app = await pGet<ApplicationRow>('SELECT * FROM application WHERE id=?', [id]);
   if (!app) throw new HttpError(404, 'APP_NOT_FOUND');
@@ -98,4 +106,33 @@ export async function updateAppSettings(appId: string, patch: Partial<AppSetting
   await pRun('UPDATE application SET settings_json=? WHERE id=?', [JSON.stringify(next), appId]);
   invalidateAppCache(row.host, row.path_prefix);
   return next;
+}
+
+// 删除应用并级联清理其全部数据（仅平台根应用，REQ-ACC-10）。
+// 用事务保证原子：任何一步失败整体回滚，避免留下孤儿数据。平台根不可删。
+export async function deleteApplication(ctx: RoleContext, id: string): Promise<void> {
+  if (!ctx.app.is_platform_root) throw new HttpError(403, 'NOT_PLATFORM_ROOT');
+  if (ctx.role !== 'DEVELOPER') throw new HttpError(403, 'REQUIRES_DEVELOPER');
+  const app = await pGet<ApplicationRow>(
+    'SELECT id, host, path_prefix, is_platform_root FROM application WHERE id=?',
+    [id],
+  );
+  if (!app) throw new HttpError(404, 'APP_NOT_FOUND');
+  if (app.is_platform_root) throw new HttpError(400, 'CANNOT_DELETE_ROOT');
+  await platformTx(async (tx) => {
+    // report_placement 仅挂 report / tag_node，按 report 归属先清
+    await tx.run('DELETE FROM report_placement WHERE report_id IN (SELECT id FROM report WHERE app_id=?)', [id]);
+    await tx.run('DELETE FROM run_record WHERE app_id=?', [id]);
+    await tx.run('DELETE FROM sql_version WHERE app_id=?', [id]);
+    await tx.run('DELETE FROM export_task WHERE app_id=?', [id]);
+    await tx.run('DELETE FROM requirement WHERE app_id=?', [id]);
+    await tx.run('DELETE FROM audit_log WHERE app_id=?', [id]);
+    await tx.run('DELETE FROM report WHERE app_id=?', [id]);
+    await tx.run('DELETE FROM data_source WHERE app_id=?', [id]);
+    await tx.run('DELETE FROM llm_provider WHERE app_id=?', [id]);
+    await tx.run('DELETE FROM tag_node WHERE app_id=?', [id]);
+    await tx.run('DELETE FROM dev_workspace WHERE app_id=?', [id]);
+    await tx.run('DELETE FROM application WHERE id=?', [id]);
+  });
+  invalidateAppCache(app.host, app.path_prefix); // 即时失效缓存，避免路由仍命中已删应用
 }

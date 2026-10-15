@@ -137,7 +137,6 @@ export default function DevPage() {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setErr(d.message || '保存失败'); return; }
       setClientCanViewSql(v);
-      setMsg(v ? '已开启：甲方可见当前生效 SQL' : '已关闭：甲方不可见 SQL（默认）');
     } finally {
       setSettingBusy(false);
     }
@@ -281,9 +280,15 @@ export default function DevPage() {
     const r = await fetch(`${api}/applications`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(appForm),
     });
-    const d = await r.json();
-    if (!r.ok) { setErr(d.message); return; }
-    setMsg('应用已创建'); load();
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const friendly: Record<string, string> = { PATH_PREFIX_DUPLICATE: '路径前缀已存在，请换一个' };
+      setErr(friendly[d.code] || d.message || `创建失败（HTTP ${r.status}）`);
+      return;
+    }
+    setMsg('应用已创建');
+    setAppForm({ name: '', pathPrefix: '' }); // 清空表单
+    load();
   }
   async function setAppStatus(a: any, next: 'DISABLED' | 'ACTIVE') {
     const word = next === 'DISABLED' ? '停用' : '启用';
@@ -298,6 +303,17 @@ export default function DevPage() {
       setMsg(`应用「${a.name}」已${word}`);
       load();
     } catch (e: any) { setErr(`${word}失败：` + e.message); }
+  }
+  async function deleteApp(a: any) {
+    if (!confirm(`确认删除应用「${a.name}」（/${a.path_prefix}）？\n该应用下的数据源、报表、模型配置、需求等全部数据将永久删除，不可恢复！`)) return;
+    setErr(''); setMsg('');
+    try {
+      const r = await fetch(`${api}/applications/${a.id}`, { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.message || d.code || `删除失败（HTTP ${r.status}）`); return; }
+      setMsg(`应用「${a.name}」已删除`);
+      load();
+    } catch (e: any) { setErr('删除失败：' + e.message); }
   }
   async function loadReqs() {
     const r = await fetch(`${api}/requirements`, { cache: 'no-store' });
@@ -532,7 +548,7 @@ export default function DevPage() {
                 </div>
               </div>
               <span className={'pill' + (clientCanViewSql ? ' ok' : ' rec')} style={{ marginLeft: 'auto' }}>
-                {clientCanViewSql ? '已开启' : '已关闭'}
+                {clientCanViewSql ? '已开启：甲方可见当前生效 SQL' : '已关闭：甲方不可见 SQL（默认）'}
               </span>
             </div>
             <div className="card">
@@ -774,10 +790,18 @@ export default function DevPage() {
                 {apps.map((a) => (
                   <div key={a.id} className="pill" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     {a.name} · /{a.path_prefix}
-                    {a.is_platform_root && <span className="badge">平台根</span>}
-                    {a.status === 'DISABLED'
-                      ? <><span className="pill rec">已停用</span><button className="ghost" style={{ padding: '2px 8px' }} onClick={() => setAppStatus(a, 'ACTIVE')}>启用</button></>
-                      : (!a.is_platform_root && <button className="danger" style={{ padding: '2px 8px' }} onClick={() => setAppStatus(a, 'DISABLED')}>停用</button>)}
+                    {a.is_platform_root ? (
+                      <span className="badge">平台根</span>
+                    ) : (
+                      <>
+                        {a.status === 'DISABLED' && <span className="pill rec">已停用</span>}
+                        <button className="ghost" style={{ padding: '2px 8px' }}
+                          onClick={() => setAppStatus(a, a.status === 'DISABLED' ? 'ACTIVE' : 'DISABLED')}>
+                          {a.status === 'DISABLED' ? '启用' : '停用'}
+                        </button>
+                        <button className="danger" style={{ padding: '2px 8px' }} onClick={() => deleteApp(a)}>删除</button>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -792,7 +816,7 @@ export default function DevPage() {
           {tab === 'req' && (
             <div className="card">
               <strong>需求收件箱（{reqs.length}）</strong>
-              {reqs.length === 0 && <div className="muted">暂无需求。甲方在未配置模型时点「生成 SQL」，需求会自动出现在这里。</div>}
+              {reqs.length === 0 && <div className="muted">暂无需求。甲方在未配置模型时点「{clientCanViewSql ? '生成 SQL' : '生成报表'}」，需求会自动出现在这里。</div>}
               {reqs.map((q) => (
                 <div key={q.id} className="card" style={{ margin: '8px 0' }}>
                   <div className="row" style={{ justifyContent: 'space-between' }}>
