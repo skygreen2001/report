@@ -27,6 +27,16 @@ export const PreviewSchema = z.object({
   dataSourceId: z.string().nullish(),
 });
 
+// 「全部」分页查看：同 PreviewSchema，另带页码与每页条数（page 从 1 开始，pageSize 上限 200）
+export const AllSchema = z.object({
+  reportId: z.string().nullish(),
+  sql: z.string().nullish(),
+  params: z.record(z.any()).optional().default({}),
+  dataSourceId: z.string().nullish(),
+  page: z.number().int().min(1).optional().default(1),
+  pageSize: z.number().int().min(1).max(200).optional().default(50),
+});
+
 export const ExportSchema = z.object({
   reportId: z.string().nullish(),
   sql: z.string().nullish(),

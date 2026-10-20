@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 import { withRole, json } from '@/server/handler';
 import { rateLimit } from '@/server/ratelimit';
 import { execute } from '@/server/sql/gateway';
-import { loadDataSource, resolveDefaultDataSourceId } from '@/server/services/datasource';
+import { loadDataSource, resolveDefaultDataSourceId, getSchemaDoc, buildColumnLabels } from '@/server/services/datasource';
 import { loadReportForRole } from '@/server/services/report';
 import { PreviewSchema } from '@/server/schemas';
 import { HttpError } from '@/server/errors';
@@ -37,6 +37,13 @@ export async function POST(req: Request) {
       ctx,
       reportId,
     });
-    return json({ columns, rows });
+    // 列显示名：优先列注释第一行（结构文档有缓存；抓取失败不影响预览，回落列名）。
+    // 只带回结果列中命中的映射，避免整库注释撑大响应。
+    let columnLabels: Record<string, string> = {};
+    try {
+      const full = buildColumnLabels(await getSchemaDoc(ds.id));
+      for (const c of columns) if (full[c]) columnLabels[c] = full[c];
+    } catch { /* 结构文档不可用时静默回落 */ }
+    return json({ columns, rows, columnLabels });
   });
 }

@@ -20,7 +20,8 @@ export default function DevPage() {
   const [settingBusy, setSettingBusy] = useState(false);
 
   // 数据源表单
-  const [dsForm, setDsForm] = useState({ name: '', host: '127.0.0.1', port: 3306, database_name: 'biz_demo', username: 'report_ro', password: 'ReportRo@2026' });
+  // 端口存字符串以便输入框可清空重填，提交时再转整数（后端 schema 要求 port 为正整数）
+  const [dsForm, setDsForm] = useState({ name: '', host: 'localhost', port: '3306', database_name: 'biz_demo', username: 'report_ro', password: 'ReportRo@2026' });
   const [dsList, setDsList] = useState<any[]>([]);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
   // 删除被占用源时的「改派并删除」交互
@@ -38,6 +39,7 @@ export default function DevPage() {
   const [newParams, setNewParams] = useState<Record<string, string>>({});
   const [prevCols, setPrevCols] = useState<string[]>([]);
   const [prevRows, setPrevRows] = useState<any[]>([]);
+  const [prevLabels, setPrevLabels] = useState<Record<string, string>>({});
   const [prevMsg, setPrevMsg] = useState('');
 
   // 数据库结构文档（当前查看的数据源；不传则用应用默认）
@@ -69,6 +71,7 @@ export default function DevPage() {
   const [reqCandidates, setReqCandidates] = useState<any[]>([]);
   const [reqCols, setReqCols] = useState<string[]>([]);
   const [reqRows, setReqRows] = useState<any[]>([]);
+  const [reqLabels, setReqLabels] = useState<Record<string, string>>({});
   const [reqPrevMsg, setReqPrevMsg] = useState('');
   const [reqReportName, setReqReportName] = useState('');
   const [reqBusy, setReqBusy] = useState(false);
@@ -122,8 +125,9 @@ export default function DevPage() {
 
   async function createDs() {
     setErr('');
+    const payload = { ...dsForm, port: Number(dsForm.port) || 3306 };
     const r = await fetch(`${api}/data-sources`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dsForm),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
     });
     const d = await r.json();
     if (!r.ok) { setErr(d.message); return; }
@@ -258,6 +262,7 @@ export default function DevPage() {
       const d = await r.json();
       if (!r.ok) { setErr(`查询失败：${d.code}${d.message && d.message !== d.code ? ' — ' + d.message : ''}`); setPrevCols([]); setPrevRows([]); setPrevMsg(''); return; }
       setPrevCols(d.columns || []); setPrevRows(d.rows || []);
+      setPrevLabels(d.columnLabels || {});
       setPrevMsg(d.rows.length ? `预览成功 · ${d.rows.length} 行（上限 200）` : '查询成功，但返回 0 行');
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   }
@@ -421,6 +426,7 @@ export default function DevPage() {
       const d = await r.json();
       if (!r.ok) { setErr(`查询失败：${d.code}${d.message && d.message !== d.code ? ' — ' + d.message : ''}`); setReqCols([]); setReqRows([]); return; }
       setReqCols(d.columns || []); setReqRows(d.rows || []);
+      setReqLabels(d.columnLabels || {});
       setReqPrevMsg(d.rows.length ? `预览成功 · ${d.rows.length} 行（上限 200）` : '查询成功，但返回 0 行');
     } catch (e: any) { setErr(e.message); } finally { setReqBusy(false); }
   }
@@ -629,7 +635,7 @@ export default function DevPage() {
               <div>
                 <strong>甲方可见 SQL</strong>
                 <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                  开启后甲方在报表详情可见<strong>当前生效</strong>的 SQL，并可在「数据库结构文档」查看表/字段含义（便于技术型甲方核对口径）；两者历史版本恒定不可见。默认关闭以防表结构外泄。
+                  开启后甲方在报表详情可见当前生效的 SQL，并可在「数据库结构文档」查看表/字段含义（便于技术型甲方核对口径）；两者历史版本恒定不可见。默认关闭以防表结构外泄。
                 </div>
               </div>
               <span className={'pill' + (clientCanViewSql ? ' ok' : ' rec')} style={{ marginLeft: 'auto' }}>
@@ -641,7 +647,7 @@ export default function DevPage() {
               <div className="row" style={{ margin: '10px 0' }}>
                 {dsList.map((d) => (
                   <div key={d.id} className="pill" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    {d.name} · {d.database_name} · {d.username}
+                    {d.name} · {d.database_name} · {d.username} · {d.host}:{d.port}
                     {boot?.settings?.defaultDs === d.id && <span className="badge">默认</span>}
                     <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => testDs(d.id)}>测试</button>
                     {boot?.settings?.defaultDs !== d.id && (
@@ -674,6 +680,10 @@ export default function DevPage() {
               )}
               <div className="row">
                 <input placeholder="名称" value={dsForm.name} onChange={(e) => setDsForm({ ...dsForm, name: e.target.value })} />
+                <input placeholder="数据库域名" title="数据库主机地址，默认 localhost" style={{ maxWidth: 450 }}
+                  value={dsForm.host} onChange={(e) => setDsForm({ ...dsForm, host: e.target.value })} />
+                <input placeholder="端口" type="number" title="数据库端口，默认 3306" style={{ maxWidth: 90 }}
+                  value={dsForm.port} onChange={(e) => setDsForm({ ...dsForm, port: e.target.value })} />
                 <input placeholder="库名" value={dsForm.database_name} onChange={(e) => setDsForm({ ...dsForm, database_name: e.target.value })} />
                 <input placeholder="用户名" value={dsForm.username} onChange={(e) => setDsForm({ ...dsForm, username: e.target.value })} />
                 <input placeholder="密码" type="password" value={dsForm.password} onChange={(e) => setDsForm({ ...dsForm, password: e.target.value })} />
@@ -766,7 +776,7 @@ export default function DevPage() {
                 {prevCols.length > 0 && (
                   <div className="table-wrap" style={{ marginTop: 12 }}>
                     <table>
-                      <thead><tr>{prevCols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+                      <thead><tr>{prevCols.map((c) => <th key={c} title={c}>{prevLabels[c] || c}</th>)}</tr></thead>
                       <tbody>
                         {prevRows.map((r, i) => (
                           <tr key={i}>{prevCols.map((c) => <td key={c}>{String(r[c] ?? '')}</td>)}</tr>
@@ -962,7 +972,7 @@ export default function DevPage() {
                     <div className="card" style={{ marginTop: 10 }}>
                       <strong>③ 预览结果（{reqRows.length} 行）</strong>
                       <div className="table-wrap" style={{ marginTop: 8 }}>
-                        <table><thead><tr>{reqCols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+                        <table><thead><tr>{reqCols.map((c) => <th key={c} title={c}>{reqLabels[c] || c}</th>)}</tr></thead>
                           <tbody>{reqRows.map((r, i) => <tr key={i}>{reqCols.map((c) => <td key={c}>{String(r[c] ?? '')}</td>)}</tr>)}</tbody>
                         </table>
                       </div>

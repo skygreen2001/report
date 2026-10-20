@@ -36,6 +36,10 @@ export default function ClientPage() {
   const [err, setErr] = useState('');
   const [appUnavailable, setAppUnavailable] = useState('');
   const [busy, setBusy] = useState(false);
+  // 导出专用忙状态：与查询/预览的 busy 隔离——导出全程（建任务→轮询→下载）锁定，
+  // 避免被 runReport/preview 的 finally 复位而导致重复触发导出
+  const [exportBusy, setExportBusy] = useState(false);
+  const exportInFlight = useRef(false);
 
   // 我的报表（开发者发布的 + 自己保存的；双轨可见性已在接口层过滤）
   const [reports, setReports] = useState<ReportItem[]>([]);
@@ -47,6 +51,14 @@ export default function ClientPage() {
   const [repCols, setRepCols] = useState<string[]>([]);
   const [repRows, setRepRows] = useState<any[]>([]);
   const [repMsg, setRepMsg] = useState('');
+  // 列显示名：列名 → 注释第一行（无注释的列不在映射中，表头回落列名）
+  const [columnLabels, setColumnLabels] = useState<Record<string, string>>({});
+  // 「全部」分页查看模式：拉全量数据（不受 200 行预览限制）后按页浏览
+  const [allMode, setAllMode] = useState(false);
+  const [allPage, setAllPage] = useState(1);
+  const [allPageSize, setAllPageSize] = useState(50);
+  const [allTotal, setAllTotal] = useState(0);
+  const [allLoading, setAllLoading] = useState(false);
   // 模型配置（甲方自己的作用域，与开发者互不干扰；这里能看到并管理自己填的密钥）
   const [providers, setProviders] = useState<any[]>([]);
   const [providerId, setProviderId] = useState<string>('');
@@ -275,43 +287,89 @@ export default function ClientPage() {
   }
 
   async function doExport(fmt: 'xlsx' | 'csv') {
-    setErr(''); setBusy(true);
+    if (exportInFlight.current) return; // 已有导出在进行，忽略重复点击
+    exportInFlight.current = true;
+    setExportBusy(true); setErr(''); setMsg('正在导出，请稍候…');
     try {
       const r = await fetch(`${api}/exports`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sql, dataSourceId: effDsId, params: {}, format: fmt }),
       });
-      const d = await r.json();
+      const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.message || '导出失败');
-      pollExport(d.id);
-    } catch (e: any) { setErr(e.message); setBusy(false); }
+      await pollExport(d.id);
+    } catch (e: any) { setErr(e.message); }
+    finally { exportInFlight.current = false; setExportBusy(false); }
   }
 
   async function exportReport(fmt: 'xlsx' | 'csv') {
-    setErr(''); setBusy(true);
+    if (exportInFlight.current) return; // 已有导出在进行，忽略重复点击
+    exportInFlight.current = true;
+    setExportBusy(true); setErr(''); setMsg('正在导出，请稍候…');
     try {
       const r = await fetch(`${api}/exports`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reportId: selId, params: repParams, format: fmt }),
       });
-      const d = await r.json();
+      const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.message || '导出失败');
-      pollExport(d.id);
-    } catch (e: any) { setErr(e.message); setBusy(false); }
+      await pollExport(d.id);
+    } catch (e: any) { setErr(e.message); }
+    finally { exportInFlight.current = false; setExportBusy(false); }
   }
 
-  async function pollExport(id: string) {
-    const t = setInterval(async () => {
-      const r = await fetch(`${api}/exports/${id}`);
-      const d = await r.json();
-      if (d.status === 'DONE') {
-        clearInterval(t); setBusy(false);
-        setMsg(`导出完成（${d.rowCount} 行），开始下载…`);
-        window.open(`${api}/exports/${id}`, '_blank');
-      } else if (d.status === 'FAILED') {
-        clearInterval(t); setBusy(false); setErr('导出失败：' + (d.error || ''));
-      }
-    }, 1000);
+  // 轮询导出任务直至完成并触发下载；Promise 在任务终态时 resolve
+  function pollExport(id: string): Promise<void> {
+    return new Promise((resolve) => {
+      let settled = false;   // 终态标志：保证整个轮询最多触发一次下载
+      let fails = 0;
+      let timer: ReturnType<typeof setInterval> | undefined;
+      const stop = (after?: () => void) => {
+        settled = true;
+        if (timer) clearInterval(timer);
+        after?.();
+        resolve();
+      };
+      // 兜底：轮询超过 5 分钟强制结束，避免任务卡死时一直转
+      const cap = setTimeout(() => stop(() => setErr('导出超时，请重试')), 300_000);
+      timer = setInterval(async () => {
+        if (settled) return;
+        try {
+          const r = await fetch(`${api}/exports/${id}`);
+          const ct = r.headers.get('content-type') || '';
+          if (!ct.includes('json')) {
+            // 任务已完成：服务端直接返回文件二进制（xlsx/csv），不能再当 JSON 解析
+            if (settled) return;
+            stop();
+            clearTimeout(cap);
+            const blob = await r.blob();
+            const cd = r.headers.get('content-disposition') || '';
+            const m = /filename="?([^";]+)"?/.exec(cd);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = m ? m[1] : 'report';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            setMsg('导出完成，已开始下载');
+            return;
+          }
+          const d = await r.json();
+          fails = 0;
+          if (d.status === 'FAILED') {
+            stop(() => setErr('导出失败：' + (d.error || '未知错误')));
+          } else if (d.status === 'DONE') {
+            // 状态为完成但没有文件（极少见：文件已被清理）
+            stop(() => setErr('导出文件已不存在，请重新导出'));
+          }
+        } catch (e: any) {
+          // 网络抖动不立即放弃，连续失败 10 次（约 10s）才终止
+          if (++fails >= 10) stop(() => setErr('导出状态查询失败：' + e.message));
+        }
+      }, 1000);
+    });
   }
 
   async function save() {
@@ -342,7 +400,7 @@ export default function ClientPage() {
 
   // —— 我的报表：打开 / 执行 / 删除 / 还原 ——
   async function openReport(id: string) {
-    setErr(''); setMsg(''); setRepCols([]); setRepRows([]); setRepMsg('');
+    setErr(''); setMsg(''); setRepCols([]); setRepRows([]); setRepMsg(''); setAllMode(false);
     const r = await fetch(`${api}/reports/${id}`, { cache: 'no-store' });
     const d = await r.json();
     if (!r.ok) { setErr(d.message || '报表不存在或已被彻底删除'); return; }
@@ -357,7 +415,7 @@ export default function ClientPage() {
   }
 
   async function runReport(id: string, params: Record<string, string>) {
-    setErr(''); setBusy(true); setRepMsg('');
+    setErr(''); setBusy(true); setRepMsg(''); setAllMode(false);
     try {
       const r = await fetch(`${api}/reports/preview`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -369,8 +427,32 @@ export default function ClientPage() {
         setRepCols([]); setRepRows([]); return;
       }
       setRepCols(d.columns || []); setRepRows(d.rows || []);
+      setColumnLabels(d.columnLabels || {});
       setRepMsg(d.rows.length ? `共 ${d.rows.length} 行（上限 200）` : '查询成功，但返回 0 行');
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  }
+
+  // 「全部」：分页拉取 SQL 的全部数据（移除 LIMIT 后服务端 COUNT + 分页）
+  async function loadAll(page: number, pageSize = allPageSize) {
+    if (!selId) return;
+    setErr(''); setAllLoading(true); setAllMode(true); setAllPage(page); setAllPageSize(pageSize);
+    try {
+      const r = await fetch(`${api}/reports/all`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reportId: selId, params: repParams, page, pageSize }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setErr(`查询失败：${d.code}${d.message && d.message !== d.code ? ' — ' + d.message : ''}`);
+        setAllMode(false); setRepCols([]); setRepRows([]); return;
+      }
+      setRepCols(d.columns || []); setRepRows(d.rows || []);
+      setColumnLabels(d.columnLabels || {});
+      setAllTotal(d.total ?? 0);
+      const pages = Math.max(1, Math.ceil((d.total ?? 0) / pageSize));
+      setRepMsg(`共 ${d.total} 行 · 第 ${page}/${pages} 页（每页 ${pageSize} 行）`);
+    } catch (e: any) { setErr(e.message); setAllMode(false); }
+    finally { setAllLoading(false); }
   }
 
   async function delReport(id: string) {
@@ -486,15 +568,35 @@ export default function ClientPage() {
                   {repCols.length > 0 && (
                     <div className="table-wrap" style={{ marginTop: 10 }}>
                       <table>
-                        <thead><tr>{repCols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+                        <thead><tr>{repCols.map((c) => <th key={c} title={c}>{columnLabels[c] || c}</th>)}</tr></thead>
                         <tbody>{repRows.map((r, i) => <tr key={i}>{repCols.map((c) => <td key={c}>{String(r[c] ?? '')}</td>)}</tr>)}</tbody>
                       </table>
                     </div>
                   )}
+                  {allMode && (
+                    <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: 'wrap' }}>
+                      <span className="muted">共 {allTotal} 行</span>
+                      <select value={allPageSize} disabled={allLoading}
+                        onChange={(e) => loadAll(1, Number(e.target.value))} style={{ maxWidth: 130 }}>
+                        <option value={20}>每页 20 行</option>
+                        <option value={50}>每页 50 行</option>
+                        <option value={100}>每页 100 行</option>
+                        <option value={200}>每页 200 行</option>
+                      </select>
+                      <button className="ghost" style={{ padding: '2px 10px' }}
+                        disabled={allLoading || allPage <= 1} onClick={() => loadAll(allPage - 1)}>上一页</button>
+                      <span className="muted">第 {allPage} / {Math.max(1, Math.ceil(allTotal / allPageSize))} 页</span>
+                      <button className="ghost" style={{ padding: '2px 10px' }}
+                        disabled={allLoading || allPage >= Math.ceil(allTotal / allPageSize)} onClick={() => loadAll(allPage + 1)}>下一页</button>
+                    </div>
+                  )}
                   <div className="row" style={{ marginTop: 10 }}>
-                    <button className="ghost" disabled={busy} onClick={() => runReport(selId, repParams)}>刷新数据</button>
-                    <button className="ghost" disabled={busy} onClick={() => exportReport('xlsx')}>导出 xlsx</button>
-                    <button className="ghost" disabled={busy} onClick={() => exportReport('csv')}>导出 csv</button>
+                    <button className="ghost" disabled={busy || allLoading}
+                      onClick={() => allMode ? loadAll(allPage) : runReport(selId, repParams)}>{allMode ? '刷新本页' : '刷新数据'}</button>
+                    <button className="ghost" disabled={busy || allLoading || exportBusy}
+                      onClick={() => allMode ? runReport(selId, repParams) : loadAll(1)}>{allLoading ? '加载中…' : allMode ? '退出全部' : '全部'}</button>
+                    <button className="ghost" disabled={busy || exportBusy} onClick={() => exportReport('xlsx')}>{exportBusy ? '导出中…' : '导出 xlsx'}</button>
+                    <button className="ghost" disabled={busy || exportBusy} onClick={() => exportReport('csv')}>{exportBusy ? '导出中…' : '导出 csv'}</button>
                   </div>
                 </div>
               )}
@@ -590,8 +692,8 @@ export default function ClientPage() {
                   {understanding && <div className="muted" style={{ marginTop: 6 }}>{understanding}</div>}
                   <div className="row" style={{ marginTop: 10 }}>
                     <button onClick={preview} disabled={busy}>预览（≤200 行）</button>
-                    <button className="ghost" onClick={() => doExport('xlsx')} disabled={busy}>仅导出 xlsx</button>
-                    <button className="ghost" onClick={() => doExport('csv')} disabled={busy}>导出 csv</button>
+                    <button className="ghost" onClick={() => doExport('xlsx')} disabled={busy || exportBusy}>{exportBusy ? '导出中…' : '仅导出 xlsx'}</button>
+                    <button className="ghost" onClick={() => doExport('csv')} disabled={busy || exportBusy}>{exportBusy ? '导出中…' : '导出 csv'}</button>
                   </div>
                 </div>
               )}

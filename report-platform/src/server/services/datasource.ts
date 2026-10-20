@@ -417,3 +417,17 @@ export async function getSchemaDoc(id: string, force = false): Promise<SchemaDoc
   }
   return refreshSchemaDoc(id);
 }
+
+// 结果表格列显示名：优先列注释第一行，无注释回落原始列名。
+// 同名列先到先得（第一个有注释的表胜出）；表达式/别名等不命中映射的列由前端回落列名。
+export function buildColumnLabels(doc: SchemaDoc): Record<string, string> {
+  const labels: Record<string, string> = {};
+  for (const t of doc.tables) {
+    for (const c of t.columns) {
+      if (labels[c.name]) continue;
+      const first = (c.comment || '').split('\n')[0].trim();
+      if (first) labels[c.name] = first;
+    }
+  }
+  return labels;
+}
