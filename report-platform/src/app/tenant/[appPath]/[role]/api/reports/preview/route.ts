@@ -6,6 +6,7 @@ import { rateLimit } from '@/server/ratelimit';
 import { execute } from '@/server/sql/gateway';
 import { loadDataSource, resolveDefaultDataSourceId, getSchemaDoc, buildColumnLabels } from '@/server/services/datasource';
 import { loadReportForRole } from '@/server/services/report';
+import { parseParamSchema, resolveParams } from '@/server/services/paramMap';
 import { PreviewSchema } from '@/server/schemas';
 import { HttpError } from '@/server/errors';
 
@@ -17,20 +18,27 @@ export async function POST(req: Request) {
 
     let sql = body.sql ?? undefined;
     let dsId = body.dataSourceId ?? undefined;
+    let schemaJson: string | null | undefined;
     let reportId: string | undefined;
 
     if (body.reportId) {
       const r = await loadReportForRole(ctx, body.reportId);
       dsId = r.data_source_id ?? dsId;
       sql = r.sql_text;
+      schemaJson = r.params_schema_json; // 报表已存的参数定义（含映射选项）
       reportId = r.id;
+    } else {
+      schemaJson = body.paramsSchemaJson; // 未保存的草稿：前端把当前编辑的定义一并带上
     }
     if (!dsId) dsId = (await resolveDefaultDataSourceId(ctx)) ?? undefined;
     if (!sql) throw new HttpError(400, 'NO_SQL'); // reportId / sql 至少给一个
     if (!dsId) throw new HttpError(400, 'NO_DATA_SOURCE');
 
+    // 参数映射：甲方提交中文 label → 数据库 value（服务端权威，防伪造）
+    const params = resolveParams(parseParamSchema(schemaJson), body.params);
+
     const ds = await loadDataSource(dsId);
-    const { columns, rows } = await execute(ds, sql, body.params, {
+    const { columns, rows } = await execute(ds, sql, params, {
       maxRows: 200,
       timeoutMs: ctx.settings.timeoutMs,
       source: 'PREVIEW',

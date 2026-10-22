@@ -12,6 +12,7 @@ import { auditRun } from '@/server/services/audit';
 import { mapDbError } from '@/server/errors';
 import { loadDataSource, resolveDefaultDataSourceId, getSchemaDoc, buildColumnLabels } from '@/server/services/datasource';
 import { loadReportForRole } from '@/server/services/report';
+import { parseParamSchema, resolveParams } from '@/server/services/paramMap';
 import { AllSchema } from '@/server/schemas';
 import { HttpError } from '@/server/errors';
 
@@ -24,17 +25,24 @@ export async function POST(req: Request) {
 
     let sql = body.sql ?? undefined;
     let dsId = body.dataSourceId ?? undefined;
+    let schemaJson: string | null | undefined;
     let reportId: string | undefined;
 
     if (body.reportId) {
       const r = await loadReportForRole(ctx, body.reportId);
       dsId = r.data_source_id ?? dsId;
       sql = r.sql_text;
+      schemaJson = r.params_schema_json;
       reportId = r.id;
+    } else {
+      schemaJson = body.paramsSchemaJson;
     }
     if (!dsId) dsId = (await resolveDefaultDataSourceId(ctx)) ?? undefined;
     if (!sql) throw new HttpError(400, 'NO_SQL'); // reportId / sql 至少给一个
     if (!dsId) throw new HttpError(400, 'NO_DATA_SOURCE');
+
+    // 参数映射：甲方提交中文 label → 数据库 value（服务端权威，防伪造）
+    const params = resolveParams(parseParamSchema(schemaJson), body.params);
 
     const ds = await loadDataSource(dsId);
     const page = body.page ?? 1;
@@ -48,7 +56,7 @@ export async function POST(req: Request) {
       validate(ast, sql, [ds.database_name]);
       // 移除 LIMIT（导出基线），末尾分号一并去掉，避免破坏外层派生表
       const baseSql = rewriteBase(ast).replace(/;\s*$/, '');
-      const values = bindValues(paramNames, body.params);
+      const values = bindValues(paramNames, params);
 
       const { columns, rows, total } = await withReadonlyConn(ds, ctx.settings.timeoutMs, async (conn) => {
         // 总数：包一层派生表 COUNT，不受原 SQL 的 LIMIT 影响
@@ -68,7 +76,7 @@ export async function POST(req: Request) {
 
       await auditRun(ctx, {
         sql: baseSql,
-        params: body.params,
+        params,
         rows: rows.length,
         ms: Date.now() - started,
         result: 'SUCCESS',
@@ -93,7 +101,7 @@ export async function POST(req: Request) {
       const finalErr = dbErr ?? e;
       await auditRun(ctx, {
         sql,
-        params: body.params,
+        params,
         rows: 0,
         ms: Date.now() - started,
         result: rejected || dbErr ? 'REJECTED' : 'FAILED',

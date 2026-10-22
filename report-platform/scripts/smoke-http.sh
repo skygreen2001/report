@@ -11,7 +11,20 @@ chk() { # chk <label> <期望> <实际>
   if [ "$2" = "$3" ]; then pass=$((pass+1)); echo "  ✓ $1 ($3)";
   else fail=$((fail+1)); echo "  ✗ $1 — 期望 $2，实际 $3"; fi
 }
-st() { curl -s -o /tmp/_sm.json -w '%{http_code}' "$@"; }
+# WS：可选。所有 curl 默认都是「新浏览器身份」（中间件现场生成），而工作区认领是一次性的——
+# 第二个请求会落到新工作区，看不到第一个请求存的报表（REPORT_NOT_FOUND）。
+# 传 WS=<该应用某开发者身份串> 即可让整条冒烟跑在同一身份上（查询 dev_workspace.ws_key 获取）。
+WS=${WS:-}
+st() {
+  local args=() a
+  for a in "$@"; do
+    if [[ "$a" == http* && -n "$WS" ]]; then
+      if [[ "$a" == *\?* ]]; then a="$a&ws=$WS"; else a="$a?ws=$WS"; fi
+    fi
+    args+=("$a")
+  done
+  curl -s -o /tmp/_sm.json -w '%{http_code}' "${args[@]}"
+}
 j() { local expr="$1"; shift; node -e "const d=require('/tmp/_sm.json'); console.log($expr)" "$@" 2>/dev/null || head -c 200 /tmp/_sm.json; }
 # 安全构造 JSON（SQL 含换行/引号，直接拼字符串会破坏 JSON）
 mkjson() {

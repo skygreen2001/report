@@ -16,7 +16,8 @@ export async function deleteReport(ctx: RoleContext, reportId: string): Promise<
     if (!r) throw new HttpError(404, 'REPORT_NOT_FOUND');
     if (r[STATE_COL[track]] !== 'NORMAL') return; // 幂等（REQ-LIFE-02/09）
 
-    const bin = await getRecycleBin(ctx.appId, ctx.role);
+    // 回收站按「角色 + 工作区」定位：开发者各工作区一棵（ws_id 必须带上），甲方全应用一棵（ws_id IS NULL）
+    const bin = await getRecycleBin(ctx.appId, ctx.role, ctx.wsId);
     const pl = await tx.get('SELECT * FROM report_placement WHERE report_id=? AND role=?', [reportId, ctx.role]);
 
     await tx.run(`UPDATE report SET ${STATE_COL[track]}='RECYCLED', ${track}_recycled_at=NOW() WHERE id=?`, [reportId]);
@@ -39,7 +40,7 @@ export async function restoreReport(ctx: RoleContext, reportId: string): Promise
     const pl = await tx.get('SELECT origin_parent_id FROM report_placement WHERE report_id=? AND role=?', [reportId, ctx.role]);
     let target = pl?.origin_parent_id ?? null;
     if (target && !(await nodeExists(tx, target, ctx.role))) {
-      target = (await getRoot(ctx.appId, ctx.role)).id; // 原父已删 → 落根（REQ-LIFE-04/05）
+      target = (await getRoot(ctx.appId, ctx.role, ctx.wsId)).id; // 原父已删 → 落根（REQ-LIFE-04/05）
     }
     await tx.run(`UPDATE report SET ${STATE_COL[track]}='NORMAL' WHERE id=?`, [reportId]);
     await tx.run('UPDATE report_placement SET tag_node_id=?, origin_parent_id=NULL, recycled_at=NULL WHERE report_id=? AND role=?', [target, reportId, ctx.role]);

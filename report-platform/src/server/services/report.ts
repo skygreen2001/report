@@ -4,6 +4,7 @@ import { getRoot } from './tagTree';
 import { auditAction } from './audit';
 import { validateOnly } from '../sql/gateway';
 import { loadDataSource } from './datasource';
+import { normalizeParamSchemaJson } from './paramMap';
 import { HttpError } from '../errors';
 import crypto from 'node:crypto';
 import type { ReportRow, RoleContext } from '@/lib/types';
@@ -62,13 +63,15 @@ export async function saveReport(ctx: RoleContext, input: SaveReportInput): Prom
   const ds = await loadDataSource(input.dataSourceId);
   if (ds.app_id !== ctx.appId) throw new HttpError(403, 'FORBIDDEN');
   validateOnly(input.sqlText, ds.database_name);
+  // 参数定义（含映射选项）严格校验后规范化入库
+  const paramsSchemaJson = normalizeParamSchemaJson(input.paramsSchemaJson);
 
   const id = crypto.randomUUID();
   await platformTx(async (tx) => {
     await tx.run(
       `INSERT INTO report (id,app_id,ws_id,name,sql_text,data_source_id,params_schema_json,created_by,client_state,developer_state)
        VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      [id, ctx.appId, ctx.wsId, input.name, input.sqlText, input.dataSourceId, input.paramsSchemaJson ?? null, ctx.clientKey, 'NORMAL', 'NORMAL'],
+      [id, ctx.appId, ctx.wsId, input.name, input.sqlText, input.dataSourceId, paramsSchemaJson, ctx.clientKey, 'NORMAL', 'NORMAL'],
     );
     // 当前角色落指定目录（或根），另一角色落其根（两份 placement 同时出现，REQ-SAVE-02）
     // 开发者 → 落在自己工作区的目录树；甲方 → 落在甲方那棵树，另一条落在甲方自己的(OWNER)开发者树
@@ -87,8 +90,10 @@ export async function saveReport(ctx: RoleContext, input: SaveReportInput): Prom
   return id;
 }
 
-export async function updateSql(ctx: RoleContext, id: string, sqlText: string, note?: string): Promise<void> {
+export async function updateSql(ctx: RoleContext, id: string, sqlText: string, note?: string, paramsSchemaJson?: string | null): Promise<void> {
   if (ctx.role !== 'DEVELOPER') throw new HttpError(403, 'FORBIDDEN'); // 仅开发者改 SQL
+  // 参数定义与 SQL 原子更新：SQL 变了参数可能变，两者必须一起落（规范化校验同保存）
+  const nextSchema = normalizeParamSchemaJson(paramsSchemaJson);
   await platformTx(async (tx) => {
     // 只能改自己工作区产出的报表（跨工作区一律 404）
     const r = await tx.get('SELECT * FROM report WHERE id=? AND app_id=? AND ws_id=?', [id, ctx.appId, ctx.wsId]);
@@ -98,7 +103,7 @@ export async function updateSql(ctx: RoleContext, id: string, sqlText: string, n
     validateOnly(sqlText, ds.database_name);
     await tx.run('INSERT INTO sql_version (id,report_id,app_id,sql_text,note,created_by_role) VALUES (?,?,?,?,?,?)', [crypto.randomUUID(), id, ctx.appId, sqlText, note ?? '', 'DEVELOPER']);
     const vid = (await tx.query('SELECT id FROM sql_version WHERE report_id=? ORDER BY created_at DESC LIMIT 1', [id]))[0].id;
-    await tx.run('UPDATE report SET sql_text=?, current_sql_version_id=? WHERE id=?', [sqlText, vid, id]);
+    await tx.run('UPDATE report SET sql_text=?, current_sql_version_id=?, params_schema_json=? WHERE id=?', [sqlText, vid, nextSchema, id]);
   });
   await auditAction(ctx, { action: 'UPDATE_SQL', targetType: 'report', targetId: id });
 }

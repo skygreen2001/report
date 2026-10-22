@@ -6,6 +6,109 @@ import SchemaDoc from '@/components/SchemaDoc';
 
 interface Boot { app: any; role: string; settings: any; reports: any[]; tagTree: any[]; dataSources: any[]; llmProviders?: any[]; }
 
+// 参数映射选项：甲方看到的中文「显示名」→ 实际送进 SQL 的「数据库值」
+interface Opt { label: string; value: string }
+
+// 从 SQL 里提取 {{name}} 占位符（与后端 parser 同一套规则）
+function extractPhNames(sql: string): string[] {
+  return Array.from(new Set(Array.from(sql.matchAll(/\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g)).map((m) => m[1])));
+}
+
+// 按当前 SQL 的参数名 + 各参数选项，拼出可入库的 paramsSchemaJson（无参数/无选项返回 null）
+function buildSchemaJson(names: string[], options: Record<string, Opt[]>): string | null {
+  const arr = names.map((n) => {
+    const def: any = { name: n, label: n, type: 'string', required: true };
+    const opts = (options[n] ?? []).filter((o) => o.label.trim() && o.value.trim());
+    if (opts.length) def.options = opts.map((o) => ({ label: o.label.trim(), value: o.value.trim() }));
+    return def;
+  });
+  return arr.length ? JSON.stringify(arr) : null;
+}
+
+// 参数编辑器：预览测试值 + 可选映射（显示名 → 数据库值），新建报表与编辑已有报表共用
+function ParamEditor({
+  names, params, setParams, options, setOptions, hint, testValues = true,
+}: {
+  names: string[];
+  params: Record<string, string>;
+  setParams: (fn: (p: Record<string, string>) => Record<string, string>) => void;
+  options: Record<string, Opt[]>;
+  setOptions: (fn: (o: Record<string, Opt[]>) => Record<string, Opt[]>) => void;
+  hint?: string;
+  testValues?: boolean; // false = 只维护映射选项（编辑已有报表时用，预览测试值在新建区）
+}) {
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [draft, setDraft] = useState<Record<string, Opt>>({});
+  if (!names.length) return null;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div className="muted" style={{ marginBottom: 6 }}>
+        参数（{names.length}）：{hint ?? '填预览测试值；「映射选项」可把数据库编码翻成甲方易懂的中文下拉'}
+      </div>
+      {names.map((n) => {
+        const opts = options[n] ?? [];
+        const d = draft[n] ?? { label: '', value: '' };
+        return (
+          <div key={n} className="card" style={{ margin: '6px 0', padding: '8px 10px' }}>
+            {testValues && (
+              <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
+                <code>{n}</code>
+                {opts.length ? (
+                  <select value={params[n] ?? ''} onChange={(e) => setParams((p) => ({ ...p, [n]: e.target.value }))} style={{ maxWidth: 200 }}>
+                    <option value="">（选择 {n}）</option>
+                    {opts.map((o) => <option key={o.label} value={o.label}>{o.label}</option>)}
+                  </select>
+                ) : (
+                  <input placeholder={`${n} 的测试值`} value={params[n] ?? ''}
+                    onChange={(e) => setParams((p) => ({ ...p, [n]: e.target.value }))} style={{ maxWidth: 200 }} />
+                )}
+                <button className="ghost" style={{ padding: '2px 8px' }}
+                  onClick={() => setOpen((o) => ({ ...o, [n]: !o[n] }))}>
+                  {opts.length ? `映射选项（${opts.length}）` : '映射选项'}
+                </button>
+              </div>
+            )}
+            {!testValues && (
+              <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
+                <code>{n}</code>
+                <button className="ghost" style={{ padding: '2px 8px' }}
+                  onClick={() => setOpen((o) => ({ ...o, [n]: !o[n] }))}>
+                  {opts.length ? `映射选项（${opts.length}）` : '映射选项'}
+                </button>
+              </div>
+            )}
+            {opts.length > 0 && (
+              <div className="row" style={{ marginTop: 6, flexWrap: 'wrap', gap: 6 }}>
+                {opts.map((o, i) => (
+                  <span key={`${o.label}-${i}`} className="pill" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                    {o.label} = {o.value}
+                    <button className="danger" style={{ padding: '0 6px' }}
+                      onClick={() => setOptions((prev) => ({ ...prev, [n]: (prev[n] ?? []).filter((_, j) => j !== i) }))}>×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {open[n] && (
+              <div className="row" style={{ marginTop: 6, flexWrap: 'wrap', gap: 8 }}>
+                <input placeholder="显示名（甲方看到，如：好）" value={d.label} style={{ maxWidth: 220 }}
+                  onChange={(e) => setDraft((p) => ({ ...p, [n]: { ...d, label: e.target.value } }))} />
+                <input placeholder="数据库值（如：1）" value={d.value} style={{ maxWidth: 150 }}
+                  onChange={(e) => setDraft((p) => ({ ...p, [n]: { ...d, value: e.target.value } }))} />
+                <button className="ghost" disabled={!d.label.trim() || !d.value.trim()}
+                  onClick={() => {
+                    setOptions((prev) => ({ ...prev, [n]: [...(prev[n] ?? []), { label: d.label.trim(), value: d.value.trim() }] }));
+                    setDraft((p) => ({ ...p, [n]: { label: '', value: '' } }));
+                  }}>添加选项</button>
+                <span className="muted" style={{ fontSize: 12 }}>添加后甲方端该参数变为下拉，提交时自动换成右边的数据库值</span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function DevPage() {
   const { appPath } = useParams<{ appPath: string }>();
   const api = `/${appPath}/d/api`;
@@ -37,6 +140,9 @@ export default function DevPage() {
   const [busy, setBusy] = useState(false);
   const [newForm, setNewForm] = useState({ name: '', sqlText: '', dataSourceId: '' });
   const [newParams, setNewParams] = useState<Record<string, string>>({});
+  // 参数映射选项：新建报表（newParams/editParamOptions 分别对应「新建区」与「编辑已有报表」）
+  const [paramOptions, setParamOptions] = useState<Record<string, Opt[]>>({});
+  const [editParamOptions, setEditParamOptions] = useState<Record<string, Opt[]>>({});
   const [prevCols, setPrevCols] = useState<string[]>([]);
   const [prevRows, setPrevRows] = useState<any[]>([]);
   const [prevLabels, setPrevLabels] = useState<Record<string, string>>({});
@@ -208,11 +314,23 @@ export default function DevPage() {
     const r = await fetch(`${api}/reports/${id}`, { cache: 'no-store' });
     const d = await r.json();
     setSelReport(d); setEditSql(d.currentSql || '');
+    // 回填已保存的参数映射（显示名 → 数据库值），供继续编辑
+    const opts: Record<string, Opt[]> = {};
+    try {
+      const arr = JSON.parse(d.paramsSchemaJson || '[]');
+      if (Array.isArray(arr)) for (const p of arr) if (p?.name && Array.isArray(p.options) && p.options.length) opts[p.name] = p.options;
+    } catch { /* 坏数据按无映射处理 */ }
+    setEditParamOptions(opts);
   }
   async function saveSql() {
     if (!selReport) return;
     const r = await fetch(`${api}/reports/${selReport.id}/sql`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sqlText: editSql }),
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sqlText: editSql,
+        // 参数定义随 SQL 一起保存（映射选项在此维护，服务端规范化校验）
+        paramsSchemaJson: buildSchemaJson(editPhNames, editParamOptions),
+      }),
     });
     const d = await r.json();
     if (!r.ok) { setErr(d.message); return; }
@@ -225,7 +343,7 @@ export default function DevPage() {
     const r = await fetch(`${api}/reports/${id}/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     const d = await r.json();
     if (!r.ok) { setErr(d.message || '删除失败'); return; }
-    if (selReport?.id === id) { setSelReport(null); setEditSql(''); }
+    if (selReport?.id === id) { setSelReport(null); setEditSql(''); setEditParamOptions({}); }
     setMsg('已移入开发者回收站（甲方侧不受影响）');
     await load();
   }
@@ -238,9 +356,24 @@ export default function DevPage() {
     await load();
   }
   // SQL 里的 {{name}} 占位符（网关会校验只允许出现在值位置）
-  const phNames = Array.from(
-    new Set(Array.from(newForm.sqlText.matchAll(/\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g)).map((m) => m[1])),
-  );
+  const phNames = extractPhNames(newForm.sqlText);
+  const editPhNames = extractPhNames(editSql);
+
+  // SQL 改动后清掉「已不存在参数」的映射选项，避免脏数据随保存入库
+  useEffect(() => {
+    setParamOptions((prev) => {
+      const next: Record<string, Opt[]> = {};
+      for (const n of phNames) if (prev[n]) next[n] = prev[n];
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+  }, [newForm.sqlText]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setEditParamOptions((prev) => {
+      const next: Record<string, Opt[]> = {};
+      for (const n of editPhNames) if (prev[n]) next[n] = prev[n];
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+  }, [editSql]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 当前生效的数据源（下拉没选就用应用默认）
   const effDsId = newForm.dataSourceId || boot?.settings?.defaultDs || '';
@@ -257,7 +390,13 @@ export default function DevPage() {
     try {
       const r = await fetch(`${api}/reports/preview`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql: newForm.sqlText, dataSourceId: newForm.dataSourceId || undefined, params: newParams }),
+        body: JSON.stringify({
+          sql: newForm.sqlText,
+          dataSourceId: newForm.dataSourceId || undefined,
+          params: newParams,
+          // 草稿态参数定义一并带上：服务端据此把中文显示名映射成数据库值后再执行
+          paramsSchemaJson: buildSchemaJson(phNames, paramOptions),
+        }),
       });
       const d = await r.json();
       if (!r.ok) { setErr(`查询失败：${d.code}${d.message && d.message !== d.code ? ' — ' + d.message : ''}`); setPrevCols([]); setPrevRows([]); setPrevMsg(''); return; }
@@ -276,10 +415,8 @@ export default function DevPage() {
           name: newForm.name,
           sqlText: newForm.sqlText,
           dataSourceId: newForm.dataSourceId || undefined,
-          // 无 {{param}} 占位符时干脆不带这个字段（服务端已兼容 null）
-          ...(phNames.length
-            ? { paramsSchemaJson: JSON.stringify(phNames.map((n) => ({ name: n, label: n, type: 'string', required: true }))) }
-            : {}),
+          // 无 {{param}} 占位符时 buildSchemaJson 返回 null（服务端已兼容）
+          paramsSchemaJson: buildSchemaJson(phNames, paramOptions),
         }),
       });
       const d = await r.json();
@@ -739,20 +876,13 @@ export default function DevPage() {
                   placeholder={'SELECT region, COUNT(*) AS cnt, SUM(amount) AS total\nFROM orders\nWHERE status = {{status}}\nGROUP BY region\nORDER BY total DESC'}
                   style={{ minHeight: 140 }}
                 />
-                {phNames.length > 0 && (
-                  <div className="row" style={{ marginTop: 8 }}>
-                    <span className="muted">参数：</span>
-                    {phNames.map((n) => (
-                      <input
-                        key={n}
-                        placeholder={n}
-                        value={newParams[n] ?? ''}
-                        onChange={(e) => setNewParams({ ...newParams, [n]: e.target.value })}
-                        style={{ maxWidth: 170 }}
-                      />
-                    ))}
-                  </div>
-                )}
+                <ParamEditor
+                  names={phNames}
+                  params={newParams}
+                  setParams={setNewParams}
+                  options={paramOptions}
+                  setOptions={setParamOptions}
+                />
                 <div className="row" style={{ marginTop: 10 }}>
                   <button onClick={previewNew} disabled={busy || !newForm.sqlText.trim()}>预览（≤200 行）</button>
                   <button className="ghost" onClick={saveNewReport} disabled={busy || !newForm.name.trim() || !newForm.sqlText.trim()}>
@@ -806,9 +936,18 @@ export default function DevPage() {
                     <div className="row">
                       <strong>{selReport.name}</strong>
                       {selReport.clientHidden && <span className="pill rec">甲方已不可见</span>}
-                      <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => setSelReport(null)}>关闭</button>
+                      <button className="ghost" style={{ padding: '2px 8px' }} onClick={() => { setSelReport(null); setEditSql(''); setEditParamOptions({}); }}>关闭</button>
                     </div>
                     <textarea value={editSql} onChange={(e) => setEditSql(e.target.value)} style={{ minHeight: 120 }} />
+                    <ParamEditor
+                      names={editPhNames}
+                      params={{}}
+                      setParams={() => {}}
+                      options={editParamOptions}
+                      setOptions={setEditParamOptions}
+                      testValues={false}
+                      hint="「映射选项」把数据库编码翻成甲方易懂的中文下拉；保存 SQL 时一并生效"
+                    />
                     <div className="row" style={{ marginTop: 8 }}>
                       <button onClick={saveSql}>保存 SQL（新增不可变版本）</button>
                     </div>

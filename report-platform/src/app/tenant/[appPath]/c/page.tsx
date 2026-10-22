@@ -6,14 +6,24 @@ import SchemaDoc, { type DsLite } from '@/components/SchemaDoc';
 
 interface Settings { clientCanViewSql: boolean; defaultDs: string | null; maxRows: number; [k: string]: any; }
 interface ReportItem { id: string; name: string; tag_node_id: string | null; client_state: string; created_at: string; ws_name?: string | null; }
-interface ParamDef { name: string; label: string; }
+// 参数定义：有 options = 开发者配了映射（中文显示名 → 数据库值），前端渲染下拉、提交中文，服务端换成数据库值
+interface ParamOption { label: string; value: string; }
+interface ParamDef { name: string; label: string; options?: ParamOption[]; }
 
 function parseSchema(json?: string | null): ParamDef[] {
   if (!json) return [];
   try {
     const arr = JSON.parse(json);
     if (!Array.isArray(arr)) return [];
-    return arr.map((p: any) => ({ name: String(p.name), label: String(p.label || p.name) }));
+    return arr.map((p: any) => {
+      const def: ParamDef = { name: String(p.name), label: String(p.label || p.name) };
+      const opts = Array.isArray(p.options) ? p.options : [];
+      const clean = opts
+        .filter((o: any) => o && typeof o.label === 'string' && o.label !== '' && typeof o.value === 'string')
+        .map((o: any) => ({ label: o.label, value: o.value }));
+      if (clean.length) def.options = clean;
+      return def;
+    });
   } catch { return []; }
 }
 
@@ -556,11 +566,21 @@ export default function ClientPage() {
                   {sel.currentSql && <div className="code" style={{ marginTop: 8 }}>{sel.currentSql}</div>}
                   {repSchema.length > 0 && (
                     <div className="row" style={{ marginTop: 10 }}>
-                      {repSchema.map((p) => (
-                        <input key={p.name} style={{ maxWidth: 200 }} placeholder={p.label}
-                          value={repParams[p.name] ?? ''}
-                          onChange={(e) => setRepParams((prev) => ({ ...prev, [p.name]: e.target.value }))} />
-                      ))}
+                  {repSchema.map((p) =>
+                    p.options?.length ? (
+                      // 开发者配了映射：渲染下拉，显示中文、提交中文（服务端换成数据库值）
+                      <select key={p.name} value={repParams[p.name] ?? ''} title={p.label}
+                        onChange={(e) => setRepParams((prev) => ({ ...prev, [p.name]: e.target.value }))}
+                        style={{ maxWidth: 200 }}>
+                        <option value="">请选择{p.label}</option>
+                        {p.options.map((o) => <option key={o.label} value={o.label}>{o.label}</option>)}
+                      </select>
+                    ) : (
+                      <input key={p.name} style={{ maxWidth: 200 }} placeholder={p.label}
+                        value={repParams[p.name] ?? ''}
+                        onChange={(e) => setRepParams((prev) => ({ ...prev, [p.name]: e.target.value }))} />
+                    ),
+                  )}
                       <button disabled={busy} onClick={() => runReport(selId, repParams)}>查询</button>
                     </div>
                   )}

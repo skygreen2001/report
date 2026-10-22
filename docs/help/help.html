@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>企业报表平台 · 帮助文档</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --border: #e5e7eb;
+    --text: #1f2937; --muted: #6b7280;
+    --primary: #2563eb; --primary-soft: #eff6ff;
+    --ok-bg: #ecfdf5; --ok-tx: #047857;
+    --warn-bg: #fffbeb; --warn-tx: #b45309;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.75; font-size: 15px;
+  }
+  .layout { display: flex; max-width: 1280px; margin: 0 auto; gap: 28px; padding: 28px 20px 80px; }
+  nav.toc {
+    width: 230px; flex-shrink: 0; position: sticky; top: 28px; align-self: flex-start;
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px 8px; max-height: calc(100vh - 56px); overflow-y: auto;
+  }
+  nav.toc .brand { font-weight: 700; font-size: 15px; padding: 0 12px 10px; color: var(--primary); }
+  nav.toc a {
+    display: block; padding: 6px 12px; color: var(--muted); text-decoration: none;
+    font-size: 13.5px; border-radius: 8px; border-left: 2px solid transparent;
+  }
+  nav.toc a.lv2 { padding-left: 26px; font-size: 13px; }
+  nav.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+  main { flex: 1; min-width: 0; }
+  .hero {
+    background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 60%, #60a5fa 100%);
+    color: #fff; border-radius: 16px; padding: 34px 34px 30px; margin-bottom: 26px;
+  }
+  .hero h1 { font-size: 26px; margin-bottom: 10px; }
+  .hero p { opacity: .92; max-width: 760px; font-size: 14.5px; }
+  .hero .tags { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .hero .tag { background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.35); padding: 3px 12px; border-radius: 999px; font-size: 12.5px; }
+  section {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 26px 30px; margin-bottom: 22px; scroll-margin-top: 20px;
+  }
+  h2 { font-size: 19px; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  h2 .no { color: var(--primary); margin-right: 8px; font-variant-numeric: tabular-nums; }
+  h3 { font-size: 15.5px; margin: 20px 0 8px; }
+  h3:first-of-type { margin-top: 4px; }
+  p { margin: 8px 0; }
+  ul, ol { padding-left: 22px; margin: 8px 0; }
+  li { margin: 4px 0; }
+  code {
+    background: #f1f3f5; border: 1px solid var(--border); border-radius: 5px;
+    padding: 1px 6px; font-size: 13px; font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+  pre {
+    background: #0f172a; color: #e2e8f0; border-radius: 10px; padding: 16px 18px;
+    overflow-x: auto; font-size: 13px; line-height: 1.6; margin: 10px 0;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+  pre code { background: transparent; border: none; color: inherit; padding: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; vertical-align: top; }
+  th { background: #f8fafc; font-weight: 600; white-space: nowrap; }
+  .note {
+    background: var(--primary-soft); border-left: 3px solid var(--primary);
+    border-radius: 0 8px 8px 0; padding: 10px 14px; margin: 12px 0; font-size: 13.5px; color: #1e40af;
+  }
+  .tip {
+    background: var(--ok-bg); border-left: 3px solid #10b981;
+    border-radius: 0 8px 8px 0; padding: 10px 14px; margin: 12px 0; font-size: 13.5px; color: var(--ok-tx);
+  }
+  .warn {
+    background: var(--warn-bg); border-left: 3px solid #f59e0b;
+    border-radius: 0 8px 8px 0; padding: 10px 14px; margin: 12px 0; font-size: 13.5px; color: var(--warn-tx);
+  }
+  .shot {
+    display: block; width: 100%; border: 1px solid var(--border); border-radius: 10px;
+    margin: 12px 0 4px; box-shadow: 0 2px 10px rgba(15,23,42,.06);
+  }
+  .shot-cap { text-align: center; color: var(--muted); font-size: 12.5px; margin: 4px 0 14px; }
+  .flow { display: flex; gap: 0; align-items: stretch; flex-wrap: wrap; margin: 14px 0; }
+  .flow .step {
+    flex: 1; min-width: 200px; background: #f8fafc; border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 14px; position: relative; margin: 0 22px 10px 0; font-size: 13.5px;
+  }
+  .flow .step b { color: var(--primary); display: block; margin-bottom: 4px; }
+  .flow .step::after {
+    content: "→"; position: absolute; right: -20px; top: 50%; transform: translateY(-50%);
+    color: #94a3b8; font-size: 17px;
+  }
+  .flow .step:last-child::after { content: ""; }
+  video {
+    width: 100%; border-radius: 10px; border: 1px solid var(--border);
+    background: #000; box-shadow: 0 2px 10px rgba(15,23,42,.08);
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 1080px) {
+    nav.toc { display: none; }
+    .grid2 { grid-template-columns: 1fr; }
+  }
+  .top-link { position: fixed; right: 22px; bottom: 22px; background: var(--primary); color: #fff;
+    border-radius: 999px; padding: 9px 16px; font-size: 13px; text-decoration: none; box-shadow: 0 4px 14px rgba(37,99,235,.35); }
+</style>
+</head>
+<body>
+<div class="layout" id="top">
+
+<nav class="toc">
+  <div class="brand">📘 帮助文档</div>
+  <a href="#intro">1 · 平台是什么</a>
+  <a href="#quick">2 · 三十秒上手</a>
+  <a href="#dev">3 · 开发者端</a>
+  <a href="#dev-ds" class="lv2">3.1 数据源</a>
+  <a href="#dev-switch" class="lv2">3.2 甲方可见 SQL 开关</a>
+  <a href="#dev-doc" class="lv2">3.3 结构文档</a>
+  <a href="#dev-report" class="lv2">3.4 新建报表</a>
+  <a href="#dev-llm" class="lv2">3.5 模型配置</a>
+  <a href="#dev-req" class="lv2">3.6 需求收件箱</a>
+  <a href="#dev-app" class="lv2">3.7 回收站与应用管理</a>
+  <a href="#client">4 · 甲方端</a>
+  <a href="#c-view" class="lv2">4.1 查看报表 / 全部 / 导出</a>
+  <a href="#c-gen" class="lv2">4.2 生成新报表</a>
+  <a href="#c-more" class="lv2">4.3 结构文档与回收站</a>
+  <a href="#params">5 · 参数化报表</a>
+  <a href="#params-dev" class="lv2">5.1 开发者定义参数</a>
+  <a href="#params-client" class="lv2">5.2 甲方填写参数</a>
+  <a href="#params-map" class="lv2">5.3 参数映射（中文下拉）</a>
+  <a href="#ws">6 · 身份与多设备</a>
+  <a href="#sec">7 · 安全边界</a>
+  <a href="#faq">8 · 常见问题</a>
+</nav>
+
+<main>
+  <div class="hero">
+    <h1>企业报表平台 · 帮助文档 <span style="font-size:14px;opacity:.8">v1.0</span></h1>
+    <p>把「会用数据库的人」和「要看数据的人」连起来——开发者配置数据源、写 SQL 做成报表；甲方打开链接就能查数、导出，也可以用自然语言让 AI 生成新报表。全程只读、按应用隔离。</p>
+    <div class="tags">
+      <span class="tag">无需注册登录</span>
+      <span class="tag">只读 SQL 网关</span>
+      <span class="tag">AI 生成报表</span>
+      <span class="tag">双轨回收站</span>
+      <span class="tag">xlsx / csv 导出</span>
+    </div>
+  </div>
+
+  <!-- 1 平台是什么 -->
+  <section id="intro">
+    <h2><span class="no">1</span>平台是什么</h2>
+    <div class="grid2">
+      <div>
+        <h3>👨‍💻 开发者（/d）</h3>
+        <ul>
+          <li>配置<b>只读数据源</b>，自动生成数据库结构文档</li>
+          <li>手写 SQL 或让 AI 生成 SQL，<b>一键发布报表</b></li>
+          <li>决定甲方<b>能否看到 SQL</b> 与表结构说明</li>
+          <li>接收甲方需求，完成后<b>回填报表通知甲方</b></li>
+        </ul>
+      </div>
+      <div>
+        <h3>🧑‍💼 甲方（/c）</h3>
+        <ul>
+          <li>点开报表<b>立即自动运行</b>——仅当开发者定义了参数（<code>{{名称}}</code> 占位符）时才需填参数后点「查询」</li>
+          <li>「全部」分页浏览<b>全量数据</b>，导出 xlsx / csv</li>
+          <li>用<b>自然语言</b>生成新报表并保存常用</li>
+          <li>自己配 AI 模型（与开发者互不干扰）</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 三十秒上手 -->
+  <section id="quick">
+    <h2><span class="no">2</span>三十秒上手</h2>
+    <table>
+      <tr><th>你是谁</th><th>入口</th><th>能做什么</th></tr>
+      <tr><td>开发者</td><td><code>http://localhost:3111/platform/d</code></td><td>配数据源、写 / 生成 SQL、发布报表、处理甲方需求</td></tr>
+      <tr><td>甲方</td><td><code>http://localhost:3111/platform/c</code></td><td>查报表、翻全量数据、导出文件、自然语言生成新报表</td></tr>
+    </table>
+    <p class="note">路径规则：<code>/{应用路径}/d</code> 开发者端、<code>/{应用路径}/c</code> 甲方端。根路径 <code>/</code> 自动跳转平台根的开发者端。</p>
+    <div class="flow">
+      <div class="step"><b>① 开发者</b>新建应用 → 配置只读数据源 → 写 SQL 建报表</div>
+      <div class="step"><b>② 甲方</b>打开 /c → 点「查看」运行 → 需要全量点「全部」→ 导出</div>
+      <div class="step"><b>③ 缺报表？</b>甲方自然语言生成；没配模型时需求自动提交开发者</div>
+    </div>
+    <h3>🎬 甲方端完整操作演示（约 40 秒）</h3>
+    <video src="assets/demo-client.webm" controls preload="metadata"></video>
+    <p class="shot-cap">查看报表 → 「全部」分页浏览 → 翻页/退出 → 生成新报表入口 → 模型配置</p>
+  </section>
+
+  <!-- 3 开发者端 -->
+  <section id="dev">
+    <h2><span class="no">3</span>开发者端（/d）</h2>
+
+    <h3 id="dev-ds">3.1 数据源</h3>
+    <ul>
+      <li>填 <b>名称 / 数据库域名 / 端口 / 库名 / 用户名 / 密码</b> 后「新建」；域名默认 <code>localhost</code>、端口默认 <code>3306</code>。</li>
+      <li>务必使用<b>只读账号</b>（仅 SELECT）。平台会验收：<b>测试连接后 INSERT 必须失败</b>才算合格。</li>
+      <li>同一应用内连接信息完全相同的数据源会被<b>自动去重</b>（409 提示）。</li>
+      <li>删除被报表引用的数据源时不会直接删：选择同应用的其他数据源「<b>改派并删除</b>」，事务内完成改派，避免悬空引用。</li>
+      <li>数据源<b>按应用隔离</b>：A 应用的数据源只能给 A 用，跨应用绑定返回 403。</li>
+    </ul>
+    <img class="shot" src="assets/d-01-datasource.png" alt="数据源页">
+    <p class="shot-cap">数据源页：顶部「甲方可见 SQL」开关 · 数据源列表（测试 / 设为默认 / 结构文档 / 删除）· 新建表单</p>
+
+    <h3 id="dev-switch">3.2 「甲方可见 SQL」开关</h3>
+    <table>
+      <tr><th>状态</th><th>效果</th></tr>
+      <tr><td><b>关闭</b>（默认）</td><td>甲方看不到 SQL，也看不到「数据库结构文档」；甲方端按钮显示「生成报表」</td></tr>
+      <tr><td><b>开启</b></td><td>甲方在报表详情可见当前生效的 SQL，可查看表 / 字段含义，便于技术型甲方核对口径</td></tr>
+    </table>
+    <p class="tip">只对当前生效版本生效，历史版本永远不可见——既方便核对口径，又不泄露演变过程。</p>
+
+    <h3 id="dev-doc">3.3 数据库结构文档</h3>
+    <p>自动读取库中的表、字段、注释、索引并生成文档；结果列的表头含义优先使用<b>列注释的第一行</b>（无注释则回落到列名）。甲方端表格表头的中文含义同样来自这里。</p>
+    <img class="shot" src="assets/d-02-schemadoc.png" alt="结构文档">
+    <p class="shot-cap">数据库结构文档：按表展示字段、类型、注释与索引</p>
+
+    <h3 id="dev-report">3.4 报表（写 SQL 建报表）</h3>
+    <ol>
+      <li>展开「<b>新建报表（直接写 SQL）</b>」，填报表名称、选数据源；</li>
+      <li>写 SELECT，参数用 <code>{{名称}}</code> 占位（仅可出现在<b>值的位置</b>）；</li>
+      <li>「预览（≤200 行）」确认数据无误后「保存为报表」，甲方端立即可见；</li>
+      <li>点开已有报表可修改 SQL，保存会<b>新增不可变版本</b>（旧版本保留可追溯）。</li>
+    </ol>
+<pre><code>SELECT region, COUNT(*) AS cnt, SUM(amount) AS total
+FROM orders
+WHERE status = {{status}}
+GROUP BY region
+ORDER BY total DESC</code></pre>
+    <p class="note">预览 0 行 ≠ 出错：SQL 已跑通，只是没匹配数据。常见原因：字段存的是编码（如 <code>status=1</code>）而不是中文、时间范围不覆盖、选错数据源。<br>📎 带参数报表的完整示例（定义 + 填写）见 <a href="#params" style="color:inherit;text-decoration:underline">第 5 节</a>。</p>
+    <img class="shot" src="assets/d-03-newreport.png" alt="新建报表">
+    <p class="shot-cap">新建报表：写 SQL → 预览结果（表头自动带列注释）→ 保存为报表</p>
+
+    <h3 id="dev-llm">3.5 模型配置</h3>
+    <ul>
+      <li>内联在「报表」「需求收件箱」顶部，用到模型的地方就近配置；</li>
+      <li>内置 15 家主流厂商预设，也支持<b>本地模型</b>（OpenAI 兼容协议）；</li>
+      <li>密钥 AES 加密入库，接口<b>永不回显</b>；可设默认、测试连接、启停、删除；</li>
+      <li>开发者与甲方的模型<b>完全独立</b>：各自配置、各自的 key、各自的默认。</li>
+    </ul>
+
+    <h3 id="dev-req">3.6 需求收件箱</h3>
+    <p>甲方没配模型时点「生成报表」，需求描述会<b>自动</b>出现在这里。每条需求可「<b>据此生成 SQL</b>」：</p>
+    <ol>
+      <li>补充需求描述 → 选数据源、选模型 → 生成 SQL（生成中可「停止生成」中断后端调用，或「仅取消等待」只停前端等待）；</li>
+      <li>多个库都能满足时列出候选，选定一个库的 SQL；</li>
+      <li>预览 →「保存为报表并通知甲方」，需求自动标记完成并回填报表。</li>
+    </ol>
+    <img class="shot" src="assets/d-04-requirements.png" alt="需求收件箱">
+    <p class="shot-cap">需求收件箱：甲方提交的需求会出现在这里，可一键据此生成 SQL</p>
+
+    <h3 id="dev-app">3.7 回收站与应用管理</h3>
+    <ul>
+      <li><b>回收站</b>：开发者自己的回收站，与甲方互不干扰，删除的报表可一键还原；</li>
+      <li><b>应用管理</b>（仅平台根账号可见）：新建应用（名称 + 路径前缀，路径重复 409）、停用 / 启用、删除（级联清理应用下全部数据）；<b>平台根应用不可删除</b>；</li>
+      <li>停用后最多 60 秒全站生效，访问者会看到「该应用已停用」的友好提示而不是空白页。</li>
+    </ul>
+  </section>
+
+  <!-- 4 甲方端 -->
+  <section id="client">
+    <h2><span class="no">4</span>甲方端（/c）</h2>
+
+    <h3 id="c-view">4.1 我的报表：查看 / 全部 / 导出</h3>
+    <ul>
+      <li>开发者发布的报表 + 你自己保存的报表都在这里，点「<b>查看</b>」<b>立即自动运行</b>，无需任何额外操作；</li>
+      <li>仅当开发者在 SQL 里定义了参数（<code>{{名称}}</code> 占位符）时，才会出现参数输入框，填好后点「查询」（完整示例见 <a href="#params" style="color:inherit;text-decoration:underline">第 5 节</a>）；</li>
+      <li><b>全部</b>：想看全量数据时点「全部」，进入分页浏览（每页 20 / 50 / 100 / 200 行），「退出全部」回到预览。</li>
+      <li><b>导出 xlsx / csv</b>：后台异步导出，完成后自动下载；导出期间按钮显示「导出中…」并锁定，不会重复下载。</li>
+    </ul>
+    <img class="shot" src="assets/c-01-reports.png" alt="我的报表">
+    <p class="shot-cap">甲方首页：所有开发者发布的报表汇总在此，点「查看」立即运行</p>
+    <img class="shot" src="assets/c-02-report-detail.png" alt="报表详情">
+    <p class="shot-cap">报表详情：生效 SQL（若开发者开启可见）· 参数查询 · 结果表（表头带列注释）· 全部 / 导出</p>
+
+    <h3 id="c-gen">4.2 生成新报表</h3>
+    <ol>
+      <li>用自然语言描述需求（例：「最近30天各地区的订单金额汇总，按金额降序」）；</li>
+      <li>选模型（你自己的模型配置，与开发者无关）→ 点「<b>生成 SQL</b>」；</li>
+      <li>平台自动读库表结构 → 生成 SQL → 校验表名字段；</li>
+      <li>「预览」确认后「保存为常用报表」，以后在「我的报表」一键运行；</li>
+      <li>生成不理想可「<b>求助开发者</b>」，需求直达开发者收件箱。</li>
+    </ol>
+    <p class="tip">没配模型也能用：点「生成报表」会把需求提交给开发者，由开发者完成后回填给你。</p>
+    <img class="shot" src="assets/c-03-generate.png" alt="生成新报表">
+    <p class="shot-cap">生成新报表：① 描述需求 → 选模型 → 生成 SQL → ② 预览 → ③ 保存 / 求助开发者</p>
+
+    <h3 id="c-more">4.3 数据库结构文档 · 模型配置 · 回收站</h3>
+    <ul>
+      <li><b>数据库结构文档</b>：仅在开发者开启「甲方可见 SQL」时显示；写需求前先查表与字段含义，需求描述更准。</li>
+      <li><b>模型配置</b>：你自己的模型——填 API Key（或本地模型）、设默认、测试连接；生成报表只用你这里的模型。</li>
+      <li><b>回收站</b>：甲方自己的回收站，与开发者互不干扰；删除只影响自己这侧可见性，可随时还原。</li>
+    </ul>
+    <div class="grid2">
+      <div>
+        <img class="shot" src="assets/c-04-llm.png" alt="甲方模型配置">
+        <p class="shot-cap">甲方的模型配置：与开发者各自独立</p>
+      </div>
+      <div>
+        <img class="shot" src="assets/c-05-schemadoc.png" alt="甲方结构文档">
+        <p class="shot-cap">甲方可见的数据库结构文档（需开发者开启开关）</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 参数化报表 -->
+  <section id="params">
+    <h2><span class="no">5</span>参数化报表：开发者定义，甲方填写</h2>
+    <p class="tip">结论先行：<b>无参数报表点开即自动运行；只有开发者在 SQL 里写了 <code>{{名称}}</code> 占位符的报表，甲方才需要填参数后点「查询」。</b></p>
+
+    <h3 id="params-dev">5.1 开发者：用 {{名称}} 定义参数</h3>
+    <p>在 SQL 的<b>值的位置</b>写占位符即可，<b>无需任何额外配置</b>——保存时平台自动提取参数名、生成参数表单：</p>
+<pre><code>SELECT id, customer_name AS customer, region, amount, status, created_at
+FROM orders
+WHERE status = {{status}}            -- 参数①：订单状态
+  AND created_at &gt;= {{start_date}}   -- 参数②：起始日期
+ORDER BY created_at DESC</code></pre>
+    <ul>
+      <li>占位符格式：<code>{{参数名}}</code>（可带空格 <code>{{ status }}</code>），参数名用字母/数字/下划线；</li>
+      <li>只允许出现在<b>值的位置</b>（<code>= {{status}}</code>、<code>&gt;= {{start_date}}</code>），写在表名/字段名位置会被网关拒绝；</li>
+      <li>保存前可在预览区给每个参数填测试值先验证效果（输入框标题即参数名）；</li>
+      <li>保存为报表后，甲方端会自动出现对应输入框。想更进一步？可给参数配<b>映射选项</b>，让甲方选中文、查编码（见 <a href="#params-map" style="color:inherit;text-decoration:underline">5.3</a>）。</li>
+    </ul>
+    <img class="shot" src="assets/d-05-params-dev.png" alt="开发者定义参数">
+    <p class="shot-cap">开发者写带参数的 SQL：平台自动识别出 status、start_date 两个参数并渲染输入框</p>
+
+    <h3 id="params-client">5.2 甲方：填参数查询</h3>
+    <ol>
+      <li>打开带参数的报表，会看到提示「<b>该报表需要参数，填好后点『查询』</b>」，每个参数一个输入框（标题 = 参数名）；</li>
+      <li>按提示填值——日期填 <code>2026-09-01</code> 这样的格式，状态填库里实际存的值（如 <code>PAID</code>，可先在「数据库结构文档」查或问开发者）；</li>
+      <li>点「<b>查询</b>」出结果；之后的「全部」「导出」都会按当前参数值执行。</li>
+    </ol>
+    <p>以平台内置示例报表「订单明细（参数筛选示例）」为例：</p>
+    <table>
+      <tr><th>参数</th><th>含义</th><th>示例值</th></tr>
+      <tr><td><code>status</code></td><td>订单状态</td><td><code>PAID</code></td></tr>
+      <tr><td><code>start_date</code></td><td>起始日期</td><td><code>2026-09-01</code></td></tr>
+    </table>
+    <img class="shot" src="assets/c-06-params-client.png" alt="甲方填参数">
+    <p class="shot-cap">甲方打开带参数报表：出现参数输入框 + 「该报表需要参数，填好后点『查询』」提示</p>
+    <img class="shot" src="assets/c-07-params-result.png" alt="参数查询结果">
+    <p class="shot-cap">填好参数点「查询」后的结果（status=PAID、start_date=2026-09-01，共 6 行）</p>
+    <p class="note">这个示例报表已内置在平台中，可直接打开体验：甲方端「我的报表」→「订单明细（参数筛选示例）」。</p>
+
+    <h3 id="params-map">5.3 进阶：参数映射（把数据库编码翻成中文选项）</h3>
+    <p>数据库里 <code>status</code> 存的是 <code>1/2/3/4</code> 或 <code>PAID/PENDING</code>，甲方看不懂也不会填？开发者可以给参数定义<b>映射选项</b>——甲方只看到中文下拉，提交时服务端自动换成数据库值：</p>
+    <ul>
+      <li><b>开发者定义</b>：写 SQL 后，参数区点「<b>映射选项</b>」，逐条添加「显示名 → 数据库值」：<code>好 → 1</code>、<code>还行 → 2</code>、<code>普通 → 3</code>、<code>不好 → 4</code>；</li>
+      <li><b>甲方填写</b>：该参数自动变成<b>下拉框</b>，只显示「好 / 还行 / 普通 / 不好」；选「好」点查询，实际送到数据库的是 <code>1</code>；</li>
+      <li><b>防篡改</b>：映射在<b>服务端</b>完成——甲方直接提交编码（如 <code>1</code>）会被 400 拒绝，必须从下拉选；下拉项外的值同样拒绝；</li>
+      <li>已保存的报表随时可以到「已有报表 → 点开 → 映射选项」增删选项，保存 SQL 时一并生效。</li>
+    </ul>
+    <p>以平台内置示例报表「订单明细（参数筛选示例）」为例（<code>status</code> 字段存的是英文编码）：</p>
+    <table>
+      <tr><th>数据库值</th><th>甲方看到的选项</th></tr>
+      <tr><td><code>PAID</code></td><td>已支付</td></tr>
+      <tr><td><code>PENDING</code></td><td>待支付</td></tr>
+      <tr><td><code>REFUNDED</code></td><td>已退款</td></tr>
+    </table>
+    <img class="shot" src="assets/d-06-params-map-dev.png" alt="开发者定义映射">
+    <p class="shot-cap">开发者编辑报表：status 已配好 3 个映射选项（已支付 = PAID …），start_date 未配（保持输入框）</p>
+    <img class="shot" src="assets/c-08-params-map-client.png" alt="甲方端下拉">
+    <p class="shot-cap">甲方端：status 变成下拉「请选择订单状态」，只显示中文；start_date 仍是输入框</p>
+    <img class="shot" src="assets/c-09-params-map-result.png" alt="映射查询结果">
+    <p class="shot-cap">选「已支付」+ 起始日期 2026-09-01 查询的结果（服务端已换成 status = 'PAID'）</p>
+  </section>
+
+  <!-- 6 身份 -->
+  <section id="ws">
+    <h2><span class="no">6</span>身份与多设备</h2>
+    <ul>
+      <li><b>无需注册登录</b>：每个浏览器第一次访问时自动获得一个私密身份（Cookie），开发者配置按身份隔离，谁也看不到谁的。</li>
+      <li><b>换设备 / 分享身份</b>：地址后加 <code>?ws=&lt;身份串&gt;</code> 即可把身份带到新设备。</li>
+      <li><b>查自己的身份串</b>：打开 <code>/{应用}/d/api/bootstrap</code>，返回里的 <code>workspace.wsKey</code> 就是。</li>
+      <li>甲方端是<b>汇总视图</b>：所有开发者工作区发布的报表都会出现在 <code>/c</code>。</li>
+    </ul>
+  </section>
+
+  <!-- 6 安全 -->
+  <section id="sec">
+    <h2><span class="no">7</span>安全边界（SQL 只读网关）</h2>
+    <p>所有 SQL（无论人写还是 AI 生成）都经过同一道只读网关，五道闸依次校验：</p>
+    <table>
+      <tr><th>#</th><th>闸门</th><th>说明</th></tr>
+      <tr><td>1</td><td><b>只读白名单</b></td><td>仅允许 <code>SELECT</code> / <code>WITH...SELECT</code>，按 AST 根类型判断，注释伪装无效</td></tr>
+      <tr><td>2</td><td><b>危险函数黑名单</b></td><td><code>SLEEP</code>、<code>BENCHMARK</code>、<code>LOAD_FILE</code>、<code>INTO OUTFILE</code> 等直接拒绝</td></tr>
+      <tr><td>3</td><td><b>库范围</b></td><td><code>mysql</code> / <code>sys</code> / <code>performance_schema</code> / <code>information_schema</code> 禁止访问，跨库访问不允许的库也被拒</td></tr>
+      <tr><td>4</td><td><b>深度扫描</b></td><td>剥离注释与字符串后再扫关键字，可执行注释 <code>/*!</code> 直接拒绝</td></tr>
+      <tr><td>5</td><td><b>硬截断</b></td><td>执行会话强制只读、默认超时 15 秒、默认单次最多 200 行（「全部」模式走分页截断）</td></tr>
+    </table>
+    <p>参数 <code>{{name}}</code> 只允许出现在值的位置，防注入；写操作、多语句一律拒绝。</p>
+  </section>
+
+  <!-- 7 FAQ -->
+  <section id="faq">
+    <h2><span class="no">8</span>常见问题</h2>
+    <h3>甲方点「查看」没数据？</h3>
+    <p>先确认报表绑定的数据源还能连通（开发者端「测试」），再确认参数取值在库里存在。</p>
+    <h3>预览报「语句类型不被允许 / 命中规则 XXX」？</h3>
+    <p>网关只放行只读 SELECT。去掉写操作、系统库、SLEEP 等即可；<code>/*!</code> 开头的注释也是被禁的。</p>
+    <h3>甲方看不到「数据库结构文档」？</h3>
+    <p>开发者在「数据源」页把「甲方可见 SQL」开关打开。</p>
+    <h3>导出文件在哪里？</h3>
+    <p>点击导出后页面持续轮询任务，完成后浏览器自动下载，无需手动找文件；导出历史保留 24 小时。</p>
+    <h3>生成的 SQL 不对 / 跑不通？</h3>
+    <p>甲方可在预览结果下方「求助开发者」；需求会进入开发者收件箱，由开发者生成并回填报表。</p>
+    <h3>删错了报表 / 应用？</h3>
+    <p>报表在回收站里可还原；<b>应用删除是级联且不可恢复的</b>，请谨慎操作。</p>
+  </section>
+
+  <p style="text-align:center;color:var(--muted);font-size:12.5px">企业报表平台 · 帮助文档 v1.0 · 2026-10</p>
+</main>
+</div>
+<a class="top-link" href="#top">回到顶部 ↑</a>
+</body>
+</html>

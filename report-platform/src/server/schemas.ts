@@ -20,11 +20,13 @@ export const StopGenerateSchema = z.object({
 });
 
 // sql 与 reportId 二选一：给了 reportId 就用报表当前 SQL（REQ-GEN-04）
+// paramsSchemaJson：直接给 sql 预览时，把当前编辑的参数定义（含映射选项）一并带上，服务端据此映射
 export const PreviewSchema = z.object({
   reportId: z.string().nullish(),
   sql: z.string().nullish(),
   params: z.record(z.any()).optional().default({}),
   dataSourceId: z.string().nullish(),
+  paramsSchemaJson: z.string().nullish(),
 });
 
 // 「全部」分页查看：同 PreviewSchema，另带页码与每页条数（page 从 1 开始，pageSize 上限 200）
@@ -33,6 +35,7 @@ export const AllSchema = z.object({
   sql: z.string().nullish(),
   params: z.record(z.any()).optional().default({}),
   dataSourceId: z.string().nullish(),
+  paramsSchemaJson: z.string().nullish(),
   page: z.number().int().min(1).optional().default(1),
   pageSize: z.number().int().min(1).max(200).optional().default(50),
 });
@@ -43,6 +46,7 @@ export const ExportSchema = z.object({
   params: z.record(z.any()).optional().default({}),
   format: z.enum(['xlsx', 'csv']),
   dataSourceId: z.string().nullish(),
+  paramsSchemaJson: z.string().nullish(),
 });
 
 export const SaveReportSchema = z.object({
@@ -73,6 +77,8 @@ export const CreateAppSchema = z.object({
 export const UpdateSqlSchema = z.object({
   sqlText: z.string().min(1),
   note: z.string().nullish(),
+  // 参数定义随 SQL 一起更新（SQL 变了参数可能变，保持两者原子一致）
+  paramsSchemaJson: z.string().nullish(),
 });
 
 // 模型服务商 / 本地模型（endpoint + model + apiKey，OpenAI 兼容）

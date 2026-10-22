@@ -12,7 +12,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   return withRole(req, async (ctx) => {
     if (ctx.role !== 'DEVELOPER') throw new HttpError(403, 'FORBIDDEN');
     const body = UpdateSqlSchema.parse(await req.json());
-    await updateSql(ctx, id, body.sqlText, body.note ?? undefined);
+    await updateSql(ctx, id, body.sqlText, body.note ?? undefined, body.paramsSchemaJson);
     return json({ ok: true });
   });
 }
