@@ -292,9 +292,16 @@ SQL 模板 + 参数值
 - 报表名在应用内全局唯一，已 `PURGED` 的报表同样占用名称。
 
 
+## 开发工具
+
+* [TRAE SOLO CN](https://trae.cn/)
+* [Visual Studio Code](https://code.visualstudio.com/)
+* [CodeBuddy](https://www.codebuddy.cn/)
+
+
 ## 其他
 
-- 在VSCode、CodeBuddy、Trae CN等开发工具的配置设置里，Git提交中英文注释生成模版配置如下:
+- 在VSCode、Trae CN等开发工具的配置设置里，Git提交中英文注释生成模版配置如下:
   ```
     "github.copilot.chat.commitMessageGeneration.instructions": [
         {
