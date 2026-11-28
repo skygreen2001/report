@@ -12,7 +12,7 @@ const STATE_COL: Record<Track, string> = { client: 'client_state', developer: 'd
 export async function deleteReport(ctx: RoleContext, reportId: string): Promise<void> {
   const track = ctx.role === 'DEVELOPER' ? 'developer' : 'client';
   await platformTx(async (tx) => {
-    const r = await tx.get('SELECT * FROM report WHERE id=? AND app_id=? FOR UPDATE', [reportId, ctx.appId]);
+    const r = await tx.get('SELECT * FROM report WHERE id=? AND app_id=?', [reportId, ctx.appId]);
     if (!r) throw new HttpError(404, 'REPORT_NOT_FOUND');
     if (r[STATE_COL[track]] !== 'NORMAL') return; // 幂等（REQ-LIFE-02/09）
 
@@ -20,9 +20,9 @@ export async function deleteReport(ctx: RoleContext, reportId: string): Promise<
     const bin = await getRecycleBin(ctx.appId, ctx.role, ctx.wsId);
     const pl = await tx.get('SELECT * FROM report_placement WHERE report_id=? AND role=?', [reportId, ctx.role]);
 
-    await tx.run(`UPDATE report SET ${STATE_COL[track]}='RECYCLED', ${track}_recycled_at=NOW() WHERE id=?`, [reportId]);
+    await tx.run(`UPDATE report SET ${STATE_COL[track]}='RECYCLED', ${track}_recycled_at=CURRENT_TIMESTAMP WHERE id=?`, [reportId]);
     await tx.run(
-      'UPDATE report_placement SET tag_node_id=?, origin_parent_id=?, recycled_at=NOW() WHERE report_id=? AND role=?',
+      'UPDATE report_placement SET tag_node_id=?, origin_parent_id=?, recycled_at=CURRENT_TIMESTAMP WHERE report_id=? AND role=?',
       [bin.id, pl?.tag_node_id ?? null, reportId, ctx.role],
     );
     await auditAction(ctx, { action: 'DELETE', targetType: 'report', targetId: reportId });
@@ -32,7 +32,7 @@ export async function deleteReport(ctx: RoleContext, reportId: string): Promise<
 export async function restoreReport(ctx: RoleContext, reportId: string): Promise<void> {
   const track = ctx.role === 'DEVELOPER' ? 'developer' : 'client';
   await platformTx(async (tx) => {
-    const r = await tx.get('SELECT * FROM report WHERE id=? AND app_id=? FOR UPDATE', [reportId, ctx.appId]);
+    const r = await tx.get('SELECT * FROM report WHERE id=? AND app_id=?', [reportId, ctx.appId]);
     if (!r) throw new HttpError(404, 'REPORT_NOT_FOUND');
     if (r[STATE_COL[track]] !== 'RECYCLED') throw new HttpError(409, 'NOT_IN_RECYCLE_BIN');
 
@@ -52,18 +52,18 @@ export async function purge(ctx: RoleContext, ids: string[]): Promise<void> {
   const track = ctx.role === 'DEVELOPER' ? 'developer' : 'client';
   await platformTx(async (tx) => {
     for (const id of ids) {
-      const r = await tx.get('SELECT * FROM report WHERE id=? AND app_id=? FOR UPDATE', [id, ctx.appId]);
+      const r = await tx.get('SELECT * FROM report WHERE id=? AND app_id=?', [id, ctx.appId]);
       if (!r) continue;
       if (track === 'developer') {
         const grace = ctx.settings.purgeGraceDays; // 默认 7，可配 0~30（REQ-LIFE-10/15）
         if (grace > 0) {
-          await tx.run(`UPDATE report SET developer_state='PURGED', purge_due_at=DATE_ADD(NOW(), INTERVAL ? DAY) WHERE id=?`, [grace, id]);
+          await tx.run(`UPDATE report SET developer_state='PURGED', purge_due_at=datetime('now', ?) WHERE id=?`, [`+${grace} days`, id]);
         } else {
           await hardDelete(tx, ctx, id);
         }
       } else {
         // 甲方清空 = 仅甲方不可见，开发者仍可见（REQ-LIFE-06/07/08）
-        await tx.run("UPDATE report SET client_state='PURGED', client_purged_at=NOW() WHERE id=?", [id]);
+        await tx.run("UPDATE report SET client_state='PURGED', client_purged_at=CURRENT_TIMESTAMP WHERE id=?", [id]);
       }
       await auditAction(ctx, { action: 'PURGE', targetType: 'report', targetId: id });
     }
@@ -74,12 +74,12 @@ export async function purge(ctx: RoleContext, ids: string[]): Promise<void> {
 export async function restoreClientVisibility(ctx: RoleContext, reportId: string): Promise<void> {
   if (ctx.role !== 'DEVELOPER') throw new HttpError(403, 'FORBIDDEN');
   await platformTx(async (tx) => {
-    const r = await tx.get('SELECT * FROM report WHERE id=? AND app_id=? FOR UPDATE', [reportId, ctx.appId]);
+    const r = await tx.get('SELECT * FROM report WHERE id=? AND app_id=?', [reportId, ctx.appId]);
     if (!r) throw new HttpError(404, 'REPORT_NOT_FOUND');
     if (r.client_state !== 'PURGED') throw new HttpError(409, 'CLIENT_NOT_PURGED');
     const bin = await getRecycleBin(ctx.appId, 'CLIENT');
-    await tx.run("UPDATE report SET client_state='RECYCLED', client_recycled_at=NOW() WHERE id=?", [reportId]);
-    await tx.run('UPDATE report_placement SET tag_node_id=?, recycled_at=NOW() WHERE report_id=? AND role=?', [bin.id, reportId, 'CLIENT']);
+    await tx.run("UPDATE report SET client_state='RECYCLED', client_recycled_at=CURRENT_TIMESTAMP WHERE id=?", [reportId]);
+    await tx.run('UPDATE report_placement SET tag_node_id=?, recycled_at=CURRENT_TIMESTAMP WHERE report_id=? AND role=?', [bin.id, reportId, 'CLIENT']);
   });
 }
 

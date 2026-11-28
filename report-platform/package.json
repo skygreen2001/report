@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test:gateway": "tsx test/gateway.test.ts",
     "setup:infra": "mysql -uroot -proot -h127.0.0.1 -P3306 < scripts/setup-infra.sql",
-    "seed": "node --env-file=.env.local scripts/seed.mjs"
+    "seed": "tsx --env-file=.env.local scripts/seed.ts"
   },
   "dependencies": {
     "exceljs": "^4.4.0",
@@ -20,6 +20,7 @@
     "openai": "^4.77.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "sql.js": "^1.13.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

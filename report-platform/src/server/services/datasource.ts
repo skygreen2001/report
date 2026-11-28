@@ -398,7 +398,7 @@ export async function refreshSchemaDoc(id: string): Promise<SchemaDoc> {
       columnCount: tables.reduce((n, t) => n + t.columns.length, 0),
       tables,
     };
-    await pRun('UPDATE data_source SET schema_doc_json=?, schema_doc_at=NOW() WHERE id=?', [JSON.stringify(doc), id]);
+    await pRun('UPDATE data_source SET schema_doc_json=?, schema_doc_at=CURRENT_TIMESTAMP WHERE id=?', [JSON.stringify(doc), id]);
     return doc;
   } finally {
     conn.release();

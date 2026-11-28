@@ -21,7 +21,7 @@ export async function auditRun(ctx: RoleContext, a: RunAudit): Promise<void> {
     await pRun(
       `INSERT INTO run_record
         (id, app_id, report_id, data_source_id, source, result, sql_text, params_json, row_count, ms, error_code, client_key, started_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`,
       [
         randomTrace(),
         ctx.appId,
@@ -55,7 +55,7 @@ export async function auditAction(ctx: RoleContext, a: ActionAudit): Promise<voi
     await pRun(
       `INSERT INTO audit_log
         (id, app_id, actor_role, action, target_type, target_id, detail_json, client_key, started_at)
-       VALUES (?,?,?,?,?,?,?,?,NOW())`,
+       VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`,
       [
         randomTrace(),
         ctx.appId,

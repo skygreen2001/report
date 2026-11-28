@@ -47,7 +47,7 @@ export async function completeRequirement(ctx: RoleContext, id: string): Promise
   await platformTx(async (tx) => {
     const r = await tx.get('SELECT * FROM requirement WHERE id=? AND app_id=?', [id, ctx.appId]);
     if (!r) throw new HttpError(404, 'REQ_NOT_FOUND');
-    await tx.run("UPDATE requirement SET status='PENDING_CONFIRM', updated_at=NOW() WHERE id=?", [id]);
+    await tx.run("UPDATE requirement SET status='PENDING_CONFIRM', updated_at=CURRENT_TIMESTAMP WHERE id=?", [id]);
   });
 }
 
@@ -59,7 +59,7 @@ export async function fulfillRequirement(ctx: RoleContext, id: string, reportId:
     const r = await tx.get('SELECT * FROM requirement WHERE id=? AND app_id=?', [id, ctx.appId]);
     if (!r) throw new HttpError(404, 'REQ_NOT_FOUND');
     await tx.run(
-      'UPDATE requirement SET status=?, report_id=?, updated_at=NOW() WHERE id=?',
+      'UPDATE requirement SET status=?, report_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
       ['PENDING_CONFIRM', reportId, id],
     );
   });
@@ -71,6 +71,6 @@ export async function confirmRequirement(ctx: RoleContext, id: string, confirm: 
   await platformTx(async (tx) => {
     const r = await tx.get('SELECT * FROM requirement WHERE id=? AND app_id=? AND client_key=?', [id, ctx.appId, ctx.clientKey]);
     if (!r) throw new HttpError(404, 'REQ_NOT_FOUND');
-    await tx.run('UPDATE requirement SET status=?, updated_at=NOW() WHERE id=?', [confirm ? 'CONFIRMED' : 'OPEN', id]);
+    await tx.run('UPDATE requirement SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [confirm ? 'CONFIRMED' : 'OPEN', id]);
   });
 }

@@ -84,7 +84,7 @@ export async function saveReport(ctx: RoleContext, input: SaveReportInput): Prom
     await tx.run('INSERT INTO report_placement (report_id,role,tag_node_id,origin_parent_id) VALUES (?,?,?,?)', [id, otherRole, otherRoot.id, otherRoot.id]);
     // 首个 SQL 版本（追加不可变，REQ-META-05）
     await tx.run('INSERT INTO sql_version (id,report_id,app_id,sql_text,note,created_by_role) VALUES (?,?,?,?,\'初始版本\',?)', [crypto.randomUUID(), id, ctx.appId, input.sqlText, ctx.role]);
-    await tx.run('UPDATE report SET current_sql_version_id=(SELECT id FROM sql_version WHERE report_id=? ORDER BY created_at DESC LIMIT 1) WHERE id=?', [id, id]);
+    await tx.run('UPDATE report SET current_sql_version_id=(SELECT id FROM sql_version WHERE report_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1) WHERE id=?', [id, id]);
   });
   await auditAction(ctx, { action: 'SAVE_REPORT', targetType: 'report', targetId: id });
   return id;
@@ -102,7 +102,7 @@ export async function updateSql(ctx: RoleContext, id: string, sqlText: string, n
     const ds = await loadDataSource(r.data_source_id);
     validateOnly(sqlText, ds.database_name);
     await tx.run('INSERT INTO sql_version (id,report_id,app_id,sql_text,note,created_by_role) VALUES (?,?,?,?,?,?)', [crypto.randomUUID(), id, ctx.appId, sqlText, note ?? '', 'DEVELOPER']);
-    const vid = (await tx.query('SELECT id FROM sql_version WHERE report_id=? ORDER BY created_at DESC LIMIT 1', [id]))[0].id;
+    const vid = (await tx.query('SELECT id FROM sql_version WHERE report_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1', [id]))[0].id;
     await tx.run('UPDATE report SET sql_text=?, current_sql_version_id=?, params_schema_json=? WHERE id=?', [sqlText, vid, nextSchema, id]);
   });
   await auditAction(ctx, { action: 'UPDATE_SQL', targetType: 'report', targetId: id });

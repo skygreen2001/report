@@ -121,7 +121,7 @@ export async function deleteNode(
 ): Promise<void> {
   await platformTx(async (tx) => {
     const node = await tx.get(
-      `SELECT * FROM tag_node WHERE id=? AND app_id=? AND role=? AND ${wsCond(role)} FOR UPDATE`,
+      `SELECT * FROM tag_node WHERE id=? AND app_id=? AND role=? AND ${wsCond(role)}`,
       wsParams(role, wsId, [nodeId, appId, role]),
     );
     if (!node) throw new HttpError(404, 'NODE_NOT_FOUND');
@@ -130,7 +130,7 @@ export async function deleteNode(
     const placements = await tx.query('SELECT COUNT(*) AS c FROM report_placement WHERE tag_node_id=?', [nodeId]);
     if (children[0].c > 0 || placements[0].c > 0) {
       if (mode === 'to_bin') {
-        await tx.run('UPDATE report_placement SET tag_node_id=?, recycled_at=NOW() WHERE tag_node_id=?',
+        await tx.run('UPDATE report_placement SET tag_node_id=?, recycled_at=CURRENT_TIMESTAMP WHERE tag_node_id=?',
           [(await getRecycleBin(appId, role, wsId)).id, nodeId]);
       } else {
         const parent = node.parent_id ?? (await getRoot(appId, role, wsId)).id;

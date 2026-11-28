@@ -2,6 +2,8 @@ node_modules/
 .next/
 data/exports/*
 !data/exports/.gitkeep
+data/*.db
+data/*.db-journal
 *.log
 .env.local
 next-env.d.ts

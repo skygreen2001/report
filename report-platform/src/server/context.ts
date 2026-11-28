@@ -1,5 +1,6 @@
 // RoleContext 解析（doc §2.3）。每次请求重算，绝不信任前端传入角色。
 import { pGet } from './db/platform';
+import { ensurePlatformReady } from './db/bootstrap';
 import { resolveWorkspace } from './services/devWorkspace';
 import { cacheGet, cacheSet, cacheDeleteBySuffix } from './cache';
 import { HttpError } from './errors';
@@ -80,6 +81,8 @@ export function readWsKey(req: Request, url: URL): string | null {
 
 // 解析请求 → RoleContext。host + path 推导应用与角色（doc §2.3、REQ-ACC-03/04/05）。
 export async function resolveContext(req: Request): Promise<RoleContext> {
+  // 元库已就绪（含首次自动建表与平台根应用初始化）
+  await ensurePlatformReady();
   const url = new URL(req.url);
   const host = req.headers.get('host') ?? '';
   const seg = url.pathname.split('/').filter(Boolean);

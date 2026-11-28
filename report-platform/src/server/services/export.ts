@@ -15,7 +15,8 @@ import { HttpError } from '../errors';
 import type { DataSourceRow, RoleContext } from '@/lib/types';
 
 function exportDir(): string {
-  return process.env.EXPORT_DIR || './data/exports';
+  // 部署环境应用目录只读，导出文件写到临时目录（平台重启后过期任务本就会失效）
+  return process.env.EXPORT_DIR?.trim() || path.join(process.env.TMPDIR?.trim() || '/tmp', 'report-platform', 'exports');
 }
 function ensureDir() {
   fs.mkdirSync(exportDir(), { recursive: true });
@@ -33,7 +34,7 @@ export async function createExport(ctx: RoleContext, req: ExportReq): Promise<{ 
   const id = crypto.randomUUID();
   await pRun(
     `INSERT INTO export_task (id,app_id,report_id,data_source_id,sql_text,params_json,format,status,client_key,started_at)
-     VALUES (?,?,?,?,?,?,?,'RUNNING',?,NOW())`,
+     VALUES (?,?,?,?,?,?,?,'RUNNING',?,CURRENT_TIMESTAMP)`,
     [id, ctx.appId, req.reportId ?? null, req.dataSourceId, req.sql, JSON.stringify(req.params), req.format, ctx.clientKey],
   );
   // 进程内立即触发，不阻塞响应
@@ -99,11 +100,11 @@ export async function runExportTask(id: string, ctx: RoleContext): Promise<void>
     });
 
     await pRun(
-      `UPDATE export_task SET status='DONE', file_key=?, row_count=?, expires_at=DATE_ADD(NOW(), INTERVAL ? HOUR), finished_at=NOW() WHERE id=?`,
-      [file, rowCount, ctx.settings.exportFileTtlHours, id],
+      `UPDATE export_task SET status='DONE', file_key=?, row_count=?, expires_at=datetime('now', ?), finished_at=CURRENT_TIMESTAMP WHERE id=?`,
+      [file, rowCount, `+${ctx.settings.exportFileTtlHours} hours`, id],
     );
   } catch (e) {
-    await pRun('UPDATE export_task SET status=\'FAILED\', error_msg=?, finished_at=NOW() WHERE id=?', [
+    await pRun('UPDATE export_task SET status=\'FAILED\', error_msg=?, finished_at=CURRENT_TIMESTAMP WHERE id=?', [
       e instanceof Error ? e.message : 'export failed', id,
     ]);
   }
@@ -116,7 +117,7 @@ export async function getExport(id: string): Promise<any> {
 export async function listMine(ctx: RoleContext): Promise<any[]> {
   return pQuery(
     `SELECT id,format,status,row_count,started_at,expires_at FROM export_task
-     WHERE app_id=? AND client_key=? AND started_at > DATE_SUB(NOW(), INTERVAL 30 DAY) ORDER BY started_at DESC LIMIT 50`,
+     WHERE app_id=? AND client_key=? AND started_at > datetime('now', '-30 days') ORDER BY started_at DESC LIMIT 50`,
     [ctx.appId, ctx.clientKey],
   );
 }
@@ -124,6 +125,6 @@ export async function listMine(ctx: RoleContext): Promise<any[]> {
 export async function rerun(id: string, ctx: RoleContext): Promise<void> {
   const task = await pGet<any>('SELECT * FROM export_task WHERE id=?', [id]);
   if (!task) throw new HttpError(404, 'EXPORT_NOT_FOUND');
-  await pRun(`UPDATE export_task SET status='RUNNING', error_msg=NULL, started_at=NOW() WHERE id=?`, [id]);
+  await pRun(`UPDATE export_task SET status='RUNNING', error_msg=NULL, started_at=CURRENT_TIMESTAMP WHERE id=?`, [id]);
   void runExportTask(id, ctx).catch(() => {});
 }
